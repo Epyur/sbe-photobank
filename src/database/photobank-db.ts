@@ -68,6 +68,22 @@ export class PhotobankDatabase {
     return this.data.folders.find(f => f.id === id);
   }
 
+  /** Полный путь папки от корня: «Родитель / Подпапка / Текущая». Пустой — без папки. */
+  folderPath(id: number): string {
+    if (!id) return '';
+    const byId = new Map<number, PhotoFolder>();
+    for (const f of this.data.folders) byId.set(f.id, f);
+    const parts: string[] = [];
+    let cur = byId.get(id);
+    let guard = 0;
+    while (cur && guard < 50) {
+      parts.unshift(cur.name);
+      cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+      guard++;
+    }
+    return parts.join(' / ');
+  }
+
   /** Дерево папок: {parent_id: [folders]}. */
   folderTree(): Map<number, PhotoFolder[]> {
     const tree = new Map<number, PhotoFolder[]>();

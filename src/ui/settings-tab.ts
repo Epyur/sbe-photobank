@@ -53,6 +53,16 @@ export class PhotobankSettingsTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
+      .setName('Передавать изображение (vision)')
+      .setDesc('При загрузке отправлять превью фото в ИИ — описываются реальные цвета, материалы и композиция кадра. Требует vision-модели в chat-формате (например gpt-4o). Модели Image API chad (gemini-*-image, gpt-img-*) для этого не подходят — они только генерируют картинки.')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.visionEnabled)
+        .onChange(async (value) => {
+          this.plugin.settings.visionEnabled = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
       .setHeading()
       .setName('Права доступа');
 

@@ -33,7 +33,7 @@ export class PhotobankImportService {
 
   /** Импортирует папку вольта (рекурсивно). Контекст для ИИ-описания запрашивается
    *  ОДИН раз на папку (фото в папке, как правило, объединены одной темой). */
-  async importFolder(folder: TFolder, targetFolderId: number, aiEnabled: boolean): Promise<ImportResult> {
+  async importFolder(folder: TFolder, targetFolderId: number, aiEnabled: boolean, visionEnabled: boolean): Promise<ImportResult> {
     const result: ImportResult = { scanned: 0, uploaded: 0, skipped: 0, created: 0 };
     const existingHashes = new Set(
       this.db.getAllPhotos().map(p => p.content_hash).filter(h => h),
@@ -65,14 +65,14 @@ export class PhotobankImportService {
 
     for (const child of folder.children) {
       if (child instanceof TFile) {
-        await this.importFile(child, targetFolderId, existingHashes, result, aiEnabled, aiCtx);
+        await this.importFile(child, targetFolderId, existingHashes, result, aiEnabled, aiCtx, visionEnabled);
       }
       if (child instanceof TFolder) {
         // Загружаем файлы подпапки в соответствующую папку банка.
         const bankId = bankFolderBySub.get(child.name) || targetFolderId;
         for (const file of child.children) {
           if (file instanceof TFile) {
-            await this.importFile(file, bankId, existingHashes, result, aiEnabled, aiCtx);
+            await this.importFile(file, bankId, existingHashes, result, aiEnabled, aiCtx, visionEnabled);
           }
         }
       }
@@ -87,6 +87,7 @@ export class PhotobankImportService {
     result: ImportResult,
     aiEnabled: boolean,
     aiCtx: AiDescribeContext,
+    visionEnabled: boolean,
   ): Promise<void> {
     const ext = file.extension.toLowerCase();
     const kind = this.kindOf(ext);
@@ -108,12 +109,16 @@ export class PhotobankImportService {
       const up = await this.sync.uploadFile(content, file.name, folderId, kind, mime);
 
       const schema = this.db.getSchema();
+      const imageDataUrl = aiEnabled && visionEnabled && kind === 'image'
+        ? await this.getImageDataUrl(up.thumb_key || up.file_key)
+        : undefined;
       const aiResult = aiEnabled ? await this.ai.describe({
         fileName: file.name,
-        folderName: this.folderName(folderId),
+        folderPath: this.db.folderPath(folderId),
         kind,
         context: aiCtx,
         schema,
+        imageDataUrl,
       }) : null;
 
       const custom: Record<string, unknown> = {};
@@ -212,6 +217,29 @@ export class PhotobankImportService {
   private titleFromName(fileName: string): string {
     const base = fileName.replace(/\.[^.]+$/, '');
     return base.replace(/[-_]+/g, ' ').trim() || fileName;
+  }
+
+  /** Скачивает превью файла и возвращает data URL (для vision-описания). */
+  private async getImageDataUrl(key: string): Promise<string | undefined> {
+    if (!key) return undefined;
+    try {
+      const data = await this.sync.downloadFile(key, true);
+      return this.arrayBufferToDataUrl(data, 'image/jpeg');
+    } catch (e: unknown) {
+      console.warn('Фотобанк: не удалось подготовить превью для vision:', errorMessage(e));
+      return undefined;
+    }
+  }
+
+  /** ArrayBuffer → data URL (base64). */
+  private arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return `data:${mime};base64,${window.btoa(binary)}`;
   }
 
   /** SHA-256 в hex (для дедупа по содержимому). */
