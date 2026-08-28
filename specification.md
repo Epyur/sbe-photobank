@@ -4,7 +4,7 @@
 
 - `manifest.id`: `sbe-photobank`
 - Имя: LogicTEAM.Фотобанк
-- Версия: 0.1.8
+- Версия: 0.1.9
 - Автор: Полищук Евгений (polishchuk@tn.ru)
 - Зависимость от `sbe-core` (при сборке), `sbe-llm` (ИИ-описание/поиск), `sbe-apstore`
   (JWT, новости)

@@ -675,6 +675,55 @@
   gap: 4px;
 }
 
+.tn-photo-folder-chev {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tn-photo-folder-chev-empty {
+  cursor: default;
+}
+
+.tn-photo-folder-edit {
+  flex-shrink: 0;
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .15s, background .15s;
+}
+
+.tn-photo-folder-row:hover .tn-photo-folder-edit {
+  opacity: 1;
+}
+
+.tn-photo-folder-edit:hover {
+  background: var(--background-modifier-hover);
+}
+
+.tn-btn-danger {
+  color: #fff;
+  background: var(--text-error, #e5484d);
+}
+
+.tn-btn-danger:hover {
+  background: var(--text-error-hover, #d93036);
+}
+
 .tn-photo-depth-1 {
   margin-left: 10px;
 }
