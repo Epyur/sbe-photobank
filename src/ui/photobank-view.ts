@@ -3,6 +3,7 @@ import type SbePhotobankPlugin from '../main';
 import type { PhotoItem, PhotoFolder, PhotoGroup, SchemaField, AiDescribeContext } from '../types/photobank';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
 import { promptFields } from './prompt-modal';
+import { nextLocalId } from '../services/import.service';
 
 export const SBE_PHOTOBANK_VIEW_TYPE = 'sbe-photobank-view';
 
@@ -522,7 +523,7 @@ export class PhotobankView extends ItemView {
       }) : null;
       const now = new Date().toISOString();
       const photo: PhotoItem = {
-        id: 0,
+        id: nextLocalId(),
         folder_id: folderId,
         title: aiResult?.title || this.titleFromName(file.name),
         description: aiResult?.description || '',

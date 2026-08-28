@@ -26,6 +26,29 @@ export class AiDescribeService {
     }
   }
 
+  /** LLM-вызов с моделью из настроек; при HTTP 400 «model not recognized» — повтор
+   *  без model (модель LLM-центра по умолчанию). Слишком строгий ответ (HTTP 429/504)
+   *  и клиентские ошибки не ретраим. */
+  private async completeJsonWithFallback<T>(
+    llm: { completeJson<T>(system: string, user: string, opts?: { model?: string; temperature?: number }): Promise<T> },
+    system: string,
+    user: string,
+  ): Promise<T> {
+    const model = this.model();
+    const opts = model ? { temperature: 0.4, model } : { temperature: 0.4 };
+    try {
+      return await llm.completeJson<T>(system, user, opts);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Нераспознанная модель — повторяем с моделью центра по умолчанию.
+      if (model && msg.includes('HTTP 400')) {
+        console.warn('Фотобанк: модель ИИ не распознана сервером, использую модель по умолчанию:', errorMessage(e));
+        return llm.completeJson<T>(system, user, { temperature: 0.4 });
+      }
+      throw e;
+    }
+  }
+
   /** Формирует расширенное описание/теги/категорию/свои поля. Возвращает null, если
    *  ИИ недоступен — вызывающий переходит на ручное заполнение (graceful degradation). */
   async describe(input: {
@@ -67,7 +90,7 @@ ${schemaBlock}
 - Цель использования: ${input.context.purpose || 'не указано'}`;
 
     try {
-      const result = await llm.completeJson<Partial<AiDescribeResult>>(system, user, { temperature: 0.4, model: this.model() });
+      const result = await this.completeJsonWithFallback<Partial<AiDescribeResult>>(llm, system, user);
       return {
         title: (result.title || '').trim().slice(0, 120) || '',
         description: (result.description || '').trim() || '',
@@ -98,7 +121,7 @@ ${schemaBlock}
     const system = 'Ты помогаешь искать фото в корпоративном фотобанке. По свободному запросу пользователя ' +
       'верни ТОЛЬКО JSON: {"keywords": ["3-6 ключевых слов/тегов для полнотекстового поиска"]}. Слова — на русском, краткие.';
     try {
-      const result = await llm.completeJson<{ keywords?: unknown }>(system, `Запрос: ${q}`, { temperature: 0.3, model: this.model() });
+      const result = await this.completeJsonWithFallback<{ keywords?: unknown }>(llm, system, `Запрос: ${q}`);
       const keywords = Array.isArray(result.keywords)
         ? result.keywords.map(k => String(k).trim()).filter(Boolean).slice(0, 8)
         : [];
