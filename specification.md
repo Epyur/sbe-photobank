@@ -4,7 +4,7 @@
 
 - `manifest.id`: `sbe-photobank`
 - Имя: LogicTEAM.Фотобанк
-- Версия: 0.1.9
+- Версия: 0.1.10
 - Автор: Полищук Евгений (polishchuk@tn.ru)
 - Зависимость от `sbe-core` (при сборке), `sbe-llm` (ИИ-описание/поиск), `sbe-apstore`
   (JWT, новости)
@@ -87,8 +87,12 @@
 - `rclone link --expire 7d`; ответ `{"url": ...}`.
 
 ### GET /api/photo/search?q=...&folder_id=&kind= — свободный поиск (viewer+)
-- Полнотекст `to_tsvector('russian')` по `title/description/tags/custom/location` в пределах
-  видимого; сортировка `updated_at DESC`, лимит 500. LLM-fallback — на клиенте (sbe-llm).
+- Полнотекст `to_tsvector('russian')` по `title/description/tags/custom/location` +
+  **путь папок** (рекурсивно имя папки и предков) в пределах видимого; сортировка
+  `updated_at DESC`, лимит 500.
+- Многословный запрос разбивается на слова и объединяется **OR** (не AND), чтобы найти
+  запись, где совпало хотя бы одно слово (напр. «Красный фальц» находит по «фальц»).
+  LLM-fallback — на клиенте (sbe-llm).
 
 ### Папки и права
 - `GET /api/photo/folders` (viewer+), `POST /api/photo/folders` (admin), `POST /api/photo/folders/rename` (admin),

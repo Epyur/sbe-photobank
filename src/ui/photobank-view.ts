@@ -173,7 +173,7 @@ export class PhotobankView extends ItemView {
     bankGroup.classList.add('open');
     const bankSub = nav.createDiv({ cls: 'tn-photo-submenu' });
     const mkItem = (text: string, icon: string, cls: string, onClick: () => void): void => {
-      const item = bankSub.createEl('button', { cls: `tn-photo-nav-item${cls}` });
+      const item = bankSub.createEl('button', { cls: `tn-photo-nav-item${cls}`, attr: { title: text } });
       item.createSpan({ cls: 'tn-photo-nav-ico', text: icon });
       item.createSpan({ cls: 'tn-photo-nav-lbl', text });
       item.addEventListener('click', onClick);
@@ -261,6 +261,7 @@ export class PhotobankView extends ItemView {
       // Имя папки (значок + подпись слева).
       const btn = row.createEl('button', {
         cls: `tn-photo-nav-item tn-photo-folder-name${this.state.currentFolderId === f.id && this.state.view === 'folder' ? ' active' : ''}`,
+        attr: { title: f.name },
       });
       btn.createSpan({ cls: 'tn-photo-nav-ico', text: '📁' });
       btn.createSpan({ cls: 'tn-photo-nav-lbl', text: f.name });
@@ -320,6 +321,12 @@ export class PhotobankView extends ItemView {
     photos = this.plugin.db.getAllPhotos();
     if (this.state.view === 'folder') {
       photos = photos.filter(p => p.folder_id === this.state.currentFolderId);
+      const folder = this.plugin.db.getFolder(this.state.currentFolderId);
+      if (folder) {
+        const head = content.createDiv({ cls: 'tn-photo-page-head' });
+        head.createEl('h2', { cls: 'tn-photo-page-title', text: folder.name });
+        head.createSpan({ cls: 'tn-photo-page-count', text: `${photos.length} файл(ов)` });
+      }
     }
     if (this.state.kindFilter) {
       photos = photos.filter(p => p.kind === this.state.kindFilter);
@@ -494,11 +501,27 @@ export class PhotobankView extends ItemView {
         new Notice(`Фотобанк: ${errorMessage(e)}`);
       }
     });
+    const favBtn = actions.createEl('button', { text: '⭐ В избранное', cls: 'tn-btn tn-btn-ghost' });
+    favBtn.addEventListener('click', () => void this.toggleFavorite(p, favBtn));
 
     // Комментарии.
     const commentsBox = info.createDiv({ cls: 'tn-photo-comments' });
     commentsBox.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Комментарии' });
     await this.renderComments(commentsBox, p.id);
+  }
+
+  /** Переключатель избранного: проверяет статус и добавляет/убирает из избранного. */
+  private async toggleFavorite(p: PhotoItem, btn: HTMLButtonElement): Promise<void> {
+    try {
+      const favs = await this.plugin.syncService.favorites();
+      const isFav = favs.some(f => f.id === p.id);
+      await this.plugin.syncService.setFavorite(p.id, !isFav);
+      new Notice(isFav ? 'Фотобанк: убрано из избранного' : 'Фотобанк: добавлено в избранное');
+      btn.setText(isFav ? '⭐ В избранное' : '⭐ В избранном');
+      this.render();
+    } catch (e: unknown) {
+      new Notice(`Фотобанк: ${errorMessage(e)}`);
+    }
   }
 
   private db(): { updatePhoto(id: number, updates: Partial<PhotoItem>): void; save(): Promise<void> } {
