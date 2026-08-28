@@ -7,7 +7,8 @@ import (
 )
 
 // handleSearch — свободный поиск: полнотекст (FTS) по видимым фото (viewer+).
-// Параметры: q — запрос; folder_id (опц.); kind (опц.). Результат сортируется по релевантности.
+// Ищет по title/description/tags/custom/location, а также по названию папки и всех
+// её предков (путь «Красный → Фаль»). Параметры: q; folder_id (опц.); kind (опц.).
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	email, _ := r.Context().Value(permEmailCtx{}).(string)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -18,6 +19,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
 		return
+	}
+	// visiblePhotoFilter возвращает условие без префикса таблицы — в поиске фото алиасировано p.
+	if cond != "" {
+		cond = strings.ReplaceAll(cond, "folder_id", "p.folder_id")
+		cond = strings.ReplaceAll(cond, "visibility_override", "p.visibility_override")
 	}
 
 	where := ""
@@ -30,10 +36,28 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if where != "" {
 			where += " AND "
 		}
-		where += "(to_tsvector('russian', coalesce(title,'') || ' ' || coalesce(description,'') || ' ' ||" +
-			" coalesce(tags::text,'') || ' ' || coalesce(custom::text,'') || ' ' || coalesce(location,''))" +
-			" @@ plainto_tsquery('russian', $" + itoa(idx) + "))"
-		args = append(args, q)
+		// Многословный запрос: ищем по КАЖДОМУ слову отдельно и объединяем OR
+		// (plainto_tsquery по всей фразе строит AND — «Красный фальц» требовал оба
+		// слова в одной записи и не находил ничего, если «красный» есть только в
+		// названии папки). Ранжируем ts_rank — чем больше слов совпало, тем выше.
+		words := strings.Fields(q)
+		if len(words) == 1 {
+			where += `(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
+				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
+				' ' || coalesce(fp.path,'')) @@ plainto_tsquery('russian', $` + itoa(idx) + `))`
+			args = append(args, q)
+		} else {
+			tsqueryParts := make([]string, 0, len(words))
+			for i, w := range words {
+				pi := idx + i
+				tsqueryParts = append(tsqueryParts, `plainto_tsquery('russian', $`+itoa(pi)+`)`)
+				args = append(args, w)
+			}
+			where += `(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
+				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
+				' ' || coalesce(fp.path,'')) @@ (` + strings.Join(tsqueryParts, " || ") + `))`
+			paramIdx += len(words)
+		}
 		paramIdx++
 	}
 	if folderID > 0 {
@@ -41,7 +65,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if where != "" {
 			where += " AND "
 		}
-		where += "folder_id = $" + itoa(idx)
+		where += "p.folder_id = $" + itoa(idx)
 		args = append(args, folderID)
 		paramIdx++
 	}
@@ -50,16 +74,27 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if where != "" {
 			where += " AND "
 		}
-		where += "kind = $" + itoa(idx)
+		where += "p.kind = $" + itoa(idx)
 		args = append(args, kind)
 		paramIdx++
 	}
 
-	query := "SELECT " + photoColumns + " FROM photos"
+	query := `
+WITH RECURSIVE fp AS (
+	SELECT id, name, name::text AS path FROM folders WHERE parent_id = 0
+	UNION ALL
+	SELECT f.id, f.name, (fp.path || ' ' || f.name)::text
+	FROM folders f JOIN fp ON f.parent_id = fp.id
+)
+SELECT p.id, p.folder_id, p.title, p.description, p.tags, p.custom,
+	p.file_key, p.file_name, p.file_size, p.content_hash, p.mime_type, p.kind, p.width, p.height, p.duration,
+	p.thumb_key, p.thumb_author, p.author_email, p.shot_at, p.location, p.visibility_override,
+	p.download_count, p.likes_count, p.created_at, p.updated_at
+FROM photos p LEFT JOIN fp ON fp.id = p.folder_id`
 	if where != "" {
 		query += " WHERE " + where
 	}
-	query += " ORDER BY updated_at DESC LIMIT 500"
+	query += " ORDER BY p.updated_at DESC LIMIT 500"
 
 	rows, err := s.pool.Query(r.Context(), query, args...)
 	if err != nil {
