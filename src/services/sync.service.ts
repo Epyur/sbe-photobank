@@ -369,11 +369,13 @@ export class PhotobankSyncService {
     return JSON.parse(res.text) as { thumb_key: string };
   }
 
-  /** Скачивает файл из S3 через сервис. */
-  async downloadFile(fileKey: string): Promise<ArrayBuffer> {
+  /** Скачивает файл из S3 через сервис. `view=true` — просмотр превью (не считается
+   *  скачиванием, счётчик download_count не растёт); по умолчанию — явное скачивание. */
+  async downloadFile(fileKey: string, view = false): Promise<ArrayBuffer> {
     const token = await this.getToken();
+    const qs = view ? `?key=${encodeURIComponent(fileKey)}&view=1` : `?key=${encodeURIComponent(fileKey)}`;
     const res = await this.request({
-      url: `${this.baseUrl}/api/photo/file?key=${encodeURIComponent(fileKey)}`,
+      url: `${this.baseUrl}/api/photo/file${qs}`,
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     }, 300000);
