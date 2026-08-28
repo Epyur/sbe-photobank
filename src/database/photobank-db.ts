@@ -136,6 +136,17 @@ export class PhotobankDatabase {
   /** Слияние фото с сервера (канон). Сервер авторитетен при равном/новом updated_at. */
   mergeFromServer(serverPhotos: PhotoItem[]): void {
     for (const s of serverPhotos) {
+      // Дедуп: локальная карточка с id<=0 (не синхронизированная) и тем же
+      // content_hash, что у серверной — устаревший дубль (сервер назначил свой id
+      // при push). Убираем его, серверная запись становится каноном.
+      if (s.content_hash) {
+        const dupe = this.data.photos.find(
+          p => p !== undefined && p.content_hash === s.content_hash && p.id !== s.id,
+        );
+        if (dupe && dupe.id <= 0) {
+          this.deletePhoto(dupe.id);
+        }
+      }
       const local = this.getPhoto(s.id);
       if (!local) {
         this.addPhoto({ ...s, sync_status: 'synced' });
