@@ -15,6 +15,10 @@ export interface SbePhotobankSettings {
   syncIntervalMs: number;
   /** Модель ИИ для описания и умного поиска (sbe-llm). Пусто — модель LLM-центра по умолчанию. */
   llmModel: string;
+  /** Передавать превью изображения в ИИ (vision): описывает реальные цвета/материалы.
+   *  Требует vision-модели в chat-формате (например gpt-4o); модели Image API chad
+   *  (gemini-*-image, gpt-img-*) для этого не подходят. */
+  visionEnabled: boolean;
   /** Версия, для которой уже опубликована новость в «Новости» ЦУП. */
   lastAnnouncedVersion: string;
 }
@@ -23,6 +27,7 @@ const DEFAULT_SETTINGS: SbePhotobankSettings = {
   apiUrl: 'https://epyur.fvds.ru',
   syncIntervalMs: 5 * 60 * 1000,
   llmModel: '',
+  visionEnabled: false,
   lastAnnouncedVersion: '',
 };
 

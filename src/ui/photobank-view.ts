@@ -630,12 +630,16 @@ export class PhotobankView extends ItemView {
     const ctx = await this.collectUploadContext();
     try {
       new Notice('Фотобанк: запрашиваю ИИ-описание…');
+      const imageDataUrl = this.plugin.settings.visionEnabled && p.kind === 'image'
+        ? await this.getImageDataUrl(p.thumb_key || p.file_key)
+        : undefined;
       const aiResult = await this.plugin.aiService.describe({
         fileName: p.file_name,
-        folderName: this.folderName(p.folder_id),
+        folderPath: this.plugin.db.folderPath(p.folder_id),
         kind: p.kind,
         context: ctx,
         schema: this.plugin.db.getSchema(),
+        imageDataUrl,
       });
       if (!aiResult) {
         new Notice('Фотобанк: ИИ не смог сформировать описание');
@@ -814,12 +818,16 @@ export class PhotobankView extends ItemView {
       const data = await file.arrayBuffer();
       const up = await this.plugin.syncService.uploadFile(data, file.name, folderId, kind, this.mimeOf(ext));
       const aiEnabled = await this.plugin.aiService.isAvailable();
+      const imageDataUrl = aiEnabled && this.plugin.settings.visionEnabled && kind === 'image'
+        ? await this.getImageDataUrl(up.thumb_key || up.file_key)
+        : undefined;
       const aiResult = aiEnabled ? await this.plugin.aiService.describe({
         fileName: file.name,
-        folderName: this.folderName(folderId),
+        folderPath: this.plugin.db.folderPath(folderId),
         kind,
         context: ctx,
         schema,
+        imageDataUrl,
       }) : null;
       const now = new Date().toISOString();
       const photo: PhotoItem = {
@@ -858,6 +866,29 @@ export class PhotobankView extends ItemView {
     }
   }
 
+  /** Скачивает превью файла и возвращает data URL (для vision-описания). */
+  private async getImageDataUrl(key: string): Promise<string | undefined> {
+    if (!key) return undefined;
+    try {
+      const data = await this.plugin.syncService.downloadFile(key, true);
+      return this.arrayBufferToDataUrl(data, 'image/jpeg');
+    } catch (e: unknown) {
+      console.warn('Фотобанк: не удалось подготовить превью для vision:', errorMessage(e));
+      return undefined;
+    }
+  }
+
+  /** ArrayBuffer → data URL (base64). */
+  private arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return `data:${mime};base64,${window.btoa(binary)}`;
+  }
+
   private async importFolderFlow(): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
     if (!me.hasAccess || (me.role !== 'editor' && me.role !== 'admin')) {
@@ -883,7 +914,7 @@ export class PhotobankView extends ItemView {
     }
     const aiEnabled = await this.plugin.aiService.isAvailable();
     new Notice('Фотобанк: импорт начат…');
-    const importRes = await this.plugin.importService.importFolder(folder, targetFolderId, aiEnabled);
+    const importRes = await this.plugin.importService.importFolder(folder, targetFolderId, aiEnabled, this.plugin.settings.visionEnabled);
     await this.refreshMeta();
     this.render();
     new Notice(`Фотобанк: импорт завершён — просмотрено ${importRes.scanned}, создано ${importRes.created}, пропущено ${importRes.skipped}`);
