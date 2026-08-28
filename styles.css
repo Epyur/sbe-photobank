@@ -637,6 +637,26 @@
   -webkit-box-orient: vertical;
 }
 
+.tn-photo-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tn-photo-card-cb {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.tn-photo-card-selectable {
+  cursor: pointer;
+}
+
+.tn-photo-card.is-selected {
+  outline: 2px solid var(--tn-accent, var(--interactive-accent));
+  outline-offset: -2px;
+}
+
 .tn-photo-card-meta {
   display: flex;
   gap: 6px;

@@ -5,6 +5,10 @@ export interface PromptField {
   placeholder?: string;
   /** Имя поля (ключ результата). */
   key: string;
+  /** Тип поля: text (по умолчанию) или select. */
+  type?: 'text' | 'select';
+  /** Варианты для type='select'. */
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface PromptResult {
@@ -17,16 +21,24 @@ export function promptFields(app: App, title: string, fields: PromptField[]): Pr
   return new Promise(resolve => {
     const modal = new Modal(app);
     modal.titleEl.setText(title);
-    const inputs: Record<string, HTMLInputElement> = {};
+    const inputs: Record<string, HTMLInputElement | HTMLSelectElement> = {};
 
     const card = modal.contentEl.createDiv({ cls: 'tn-card' });
     for (const f of fields) {
       card.createDiv({ cls: 'tn-photo-field-label', text: f.label });
-      const input = card.createEl('input', {
-        attr: { type: 'text', placeholder: f.placeholder || '' },
-        cls: 'tn-doc-input',
-      });
-      inputs[f.key] = input;
+      if (f.type === 'select' && f.options) {
+        const select = card.createEl('select', { cls: 'tn-doc-select' });
+        for (const o of f.options) {
+          select.createEl('option', { value: o.value, text: o.label });
+        }
+        inputs[f.key] = select;
+      } else {
+        const input = card.createEl('input', {
+          attr: { type: 'text', placeholder: f.placeholder || '' },
+          cls: 'tn-doc-input',
+        });
+        inputs[f.key] = input;
+      }
     }
 
     const actions = card.createDiv({ cls: 'tn-photo-detail-actions' });
@@ -34,7 +46,8 @@ export function promptFields(app: App, title: string, fields: PromptField[]): Pr
     okBtn.addEventListener('click', () => {
       const result: PromptResult = {};
       for (const f of fields) {
-        result[f.key] = inputs[f.key].value.trim();
+        const el = inputs[f.key];
+        result[f.key] = el.value.trim();
       }
       modal.close();
       resolve(result);
@@ -47,7 +60,7 @@ export function promptFields(app: App, title: string, fields: PromptField[]): Pr
 
     // Enter в последнем поле = ОК.
     const lastInput = fields.length > 0 ? inputs[fields[fields.length - 1].key] : undefined;
-    if (lastInput) {
+    if (lastInput && lastInput instanceof HTMLInputElement) {
       lastInput.addEventListener('keydown', (ev: KeyboardEvent) => {
         if (ev.key === 'Enter') {
           ev.preventDefault();
@@ -58,7 +71,7 @@ export function promptFields(app: App, title: string, fields: PromptField[]): Pr
 
     modal.onOpen = () => {
       const first = fields.length > 0 ? inputs[fields[0].key] : undefined;
-      if (first) {
+      if (first && first instanceof HTMLInputElement) {
         window.setTimeout(() => first.focus(), 50);
       }
     };

@@ -70,7 +70,8 @@ export class PhotobankSyncService {
     return { pushed, pulled: pulled.photos.length };
   }
 
-  private async getToken(): Promise<string> {
+  /** Публичный доступ к JWT (для pushLocal отдельных карточек из view). */
+  async getToken(): Promise<string> {
     const apstore = await getService('sbe-apstore');
     return apstore.auth.getToken('photo');
   }

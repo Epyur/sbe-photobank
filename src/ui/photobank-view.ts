@@ -24,6 +24,9 @@ export class PhotobankView extends ItemView {
     kindFilter: string;
     view: 'all' | 'folder' | 'search' | 'favorites' | 'recent';
     selectedPhotoId: number | null;
+    /** Множественный выбор карточек. */
+    selectionMode: boolean;
+    selectedPhotoIds: Set<number>;
   };
 
   constructor(leaf: WorkspaceLeaf, plugin: SbePhotobankPlugin) {
@@ -35,6 +38,8 @@ export class PhotobankView extends ItemView {
       kindFilter: '',
       view: 'all',
       selectedPhotoId: null,
+      selectionMode: false,
+      selectedPhotoIds: new Set(),
     };
   }
 
@@ -114,6 +119,20 @@ export class PhotobankView extends ItemView {
 
     const importBtn = topbar.createEl('button', { text: '📂 Импорт папки', cls: 'tn-btn tn-btn-ghost' });
     importBtn.addEventListener('click', () => void this.importFolderFlow());
+
+    const selectBtn = topbar.createEl('button', {
+      text: this.state.selectionMode ? '☑ Завершить выбор' : '☑ Выбрать',
+      cls: 'tn-btn tn-btn-ghost',
+    });
+    selectBtn.addEventListener('click', () => {
+      this.state.selectionMode = !this.state.selectionMode;
+      this.state.selectedPhotoIds = new Set();
+      this.render();
+    });
+
+    const moveBtn = topbar.createEl('button', { text: '📁 Перенести в папку', cls: 'tn-btn tn-btn-ghost' });
+    moveBtn.disabled = this.state.selectedPhotoIds.size === 0;
+    moveBtn.addEventListener('click', () => void this.moveSelectedToFolder());
 
     const syncBtn = topbar.createEl('button', { text: '🔄', cls: 'tn-btn tn-btn-ghost', attr: { title: 'Синхронизировать' } });
     syncBtn.addEventListener('click', async () => {
@@ -265,6 +284,12 @@ export class PhotobankView extends ItemView {
     const grid = content.createDiv({ cls: 'tn-photo-grid' });
     for (const p of photos) {
       const card = grid.createDiv({ cls: 'tn-photo-card' });
+      if (this.state.selectionMode) {
+        card.addClass('tn-photo-card-selectable');
+        if (this.state.selectedPhotoIds.has(p.id)) {
+          card.addClass('is-selected');
+        }
+      }
       const media = card.createDiv({ cls: 'tn-photo-card-media-placeholder' });
       if (p.thumb_key) {
         void this.loadThumb(p.thumb_key, media);
@@ -276,12 +301,35 @@ export class PhotobankView extends ItemView {
         media.setText('🖼');
       }
       const bodyEl = card.createDiv({ cls: 'tn-photo-card-body' });
-      bodyEl.createDiv({ cls: 'tn-photo-card-title', text: p.title || p.file_name });
+      const titleRow = bodyEl.createDiv({ cls: 'tn-photo-card-title-row' });
+      if (this.state.selectionMode) {
+        const cb = titleRow.createEl('input', { attr: { type: 'checkbox' }, cls: 'tn-photo-card-cb' });
+        cb.checked = this.state.selectedPhotoIds.has(p.id);
+        cb.addEventListener('click', (ev: MouseEvent) => ev.stopPropagation());
+        cb.addEventListener('change', () => {
+          if (cb.checked) {
+            this.state.selectedPhotoIds.add(p.id);
+          } else {
+            this.state.selectedPhotoIds.delete(p.id);
+          }
+          this.render();
+        });
+      }
+      titleRow.createDiv({ cls: 'tn-photo-card-title', text: p.title || p.file_name });
       const meta = bodyEl.createDiv({ cls: 'tn-photo-card-meta' });
       meta.createSpan({ cls: 'tn-photo-kind', text: KIND_LABELS[p.kind] || p.kind });
       if (p.tags && p.tags[0]) meta.createSpan({ cls: 'tn-photo-chip', text: p.tags[0] });
       if (p.likes_count > 0) meta.createSpan({ cls: 'tn-photo-chip', text: `♥ ${p.likes_count}` });
       card.addEventListener('click', () => {
+        if (this.state.selectionMode) {
+          if (this.state.selectedPhotoIds.has(p.id)) {
+            this.state.selectedPhotoIds.delete(p.id);
+          } else {
+            this.state.selectedPhotoIds.add(p.id);
+          }
+          this.render();
+          return;
+        }
         this.state.selectedPhotoId = p.id;
         void this.plugin.syncService.viewPhoto(p.id);
         this.render();
@@ -355,6 +403,12 @@ export class PhotobankView extends ItemView {
     downloadBtn.addEventListener('click', () => void this.downloadPhoto(p));
     const linkBtn = actions.createEl('button', { text: '🔗 Ссылка', cls: 'tn-btn tn-btn-ghost' });
     linkBtn.addEventListener('click', () => void this.getPhotoLink(p));
+    const editBtn = actions.createEl('button', { text: '✎ Изменить', cls: 'tn-btn tn-btn-ghost' });
+    editBtn.addEventListener('click', () => void this.editPhoto(p));
+    const aiBtn = actions.createEl('button', { text: '♻️ ИИ-описание', cls: 'tn-btn tn-btn-ghost' });
+    aiBtn.addEventListener('click', () => void this.rewriteAiDescription(p));
+    const delBtn = actions.createEl('button', { text: '🗑 Удалить', cls: 'tn-btn tn-btn-ghost' });
+    delBtn.addEventListener('click', () => void this.deletePhoto(p));
     const likeBtn = actions.createEl('button', { text: '♥', cls: 'tn-btn tn-btn-ghost' });
     likeBtn.addEventListener('click', async () => {
       try {
@@ -431,6 +485,150 @@ export class PhotobankView extends ItemView {
       if (!url) { new Notice('Фотобанк: не удалось получить ссылку'); return; }
       await navigator.clipboard.writeText(url);
       new Notice('Ссылка скопирована в буфер обмена');
+    } catch (e: unknown) {
+      new Notice(`Фотобанк: ${errorMessage(e)}`);
+    }
+  }
+
+  /** Редактирование метаданных карточки (отображаемое имя, описание, теги, локация, папка). */
+  private async editPhoto(p: PhotoItem): Promise<void> {
+    const folders = this.plugin.db.getFolders();
+    const folderOptions = [
+      { value: '0', label: 'Корень (без папки)' },
+      ...folders.map(f => ({ value: String(f.id), label: f.name })),
+    ];
+    const result = await promptFields(this.app, `Редактирование «${p.title || p.file_name}»`, [
+      { key: 'title', label: 'Отображаемое имя (в стоке)', placeholder: 'Короткое, ёмкое название' },
+      { key: 'description', label: 'Описание', placeholder: 'Расширенное описание' },
+      { key: 'tags', label: 'Теги (через запятую)', placeholder: 'тег1, тег2' },
+      { key: 'location', label: 'Локация', placeholder: 'Город, объект…' },
+      { key: 'folder', label: 'Папка', type: 'select', options: folderOptions },
+    ]);
+    if (!result) return;
+    try {
+      const updates: Partial<PhotoItem> = {
+        title: result.title || p.title,
+        description: result.description || p.description,
+        tags: result.tags ? result.tags.split(',').map(t => t.trim()).filter(Boolean) : p.tags,
+        location: result.location || p.location,
+        folder_id: parseInt(result.folder || String(p.folder_id), 10) || p.folder_id,
+        updated_at: new Date().toISOString(),
+        sync_status: 'local',
+      };
+      this.plugin.db.updatePhoto(p.id, updates);
+      await this.plugin.db.save();
+      await this.pushLocal(p.id);
+      new Notice('Фотобанк: карточка обновлена');
+      this.render();
+    } catch (e: unknown) {
+      new Notice(`Фотобанк: ${errorMessage(e)}`);
+    }
+  }
+
+  /** Перезапрос ИИ-описания: контекст → sbe-llm → обновление title/description/тегов/своих полей. */
+  private async rewriteAiDescription(p: PhotoItem): Promise<void> {
+    if (!(await this.plugin.aiService.isAvailable())) {
+      new Notice('Фотобанк: LLM-центр недоступен (sbe-llm не настроен)');
+      return;
+    }
+    const ctx = await this.collectUploadContext();
+    try {
+      new Notice('Фотобанк: запрашиваю ИИ-описание…');
+      const aiResult = await this.plugin.aiService.describe({
+        fileName: p.file_name,
+        folderName: this.folderName(p.folder_id),
+        kind: p.kind,
+        context: ctx,
+        schema: this.plugin.db.getSchema(),
+      });
+      if (!aiResult) {
+        new Notice('Фотобанк: ИИ не смог сформировать описание');
+        return;
+      }
+      const custom: Record<string, unknown> = { ...p.custom };
+      for (const [k, v] of Object.entries(aiResult.custom || {})) {
+        custom[k] = v;
+      }
+      const updates: Partial<PhotoItem> = {
+        title: aiResult.title || p.title,
+        description: aiResult.description || p.description,
+        tags: aiResult.tags.length > 0 ? aiResult.tags : p.tags,
+        location: aiResult.location || p.location,
+        custom,
+        shot_at: aiResult.shot_at || p.shot_at,
+        updated_at: new Date().toISOString(),
+        sync_status: 'local',
+      };
+      this.plugin.db.updatePhoto(p.id, updates);
+      await this.plugin.db.save();
+      await this.pushLocal(p.id);
+      new Notice('Фотобанк: ИИ-описание обновлено');
+      this.render();
+    } catch (e: unknown) {
+      new Notice(`Фотобанк: ${errorMessage(e)}`);
+    }
+  }
+
+  /** Удаление карточки и файла (admin или автор). */
+  private async deletePhoto(p: PhotoItem): Promise<void> {
+    const confirmed = window.confirm ? window.confirm(`Удалить «${p.title || p.file_name}» из фотобанка?`) : true;
+    if (!confirmed) return;
+    try {
+      await this.plugin.syncService.deletePhoto(p.id);
+      this.plugin.db.deletePhoto(p.id);
+      await this.plugin.db.save();
+      new Notice('Фотобанк: файл удалён');
+      this.state.selectedPhotoId = null;
+      this.render();
+    } catch (e: unknown) {
+      new Notice(`Фотобанк: ${errorMessage(e)}`);
+    }
+  }
+
+  /** Отправляет одну локальную карточку на сервер (push) и помечает синхронизированной. */
+  private async pushLocal(id: number): Promise<void> {
+    const p = this.plugin.db.getPhoto(id);
+    if (!p || p.sync_status !== 'local') return;
+    const token = await this.plugin.syncService.getToken();
+    await this.plugin.syncService.push(token, [p]);
+    p.sync_status = 'synced';
+    await this.plugin.db.save();
+  }
+
+  /** Переносит выделенные карточки в выбранную папку (множественный выбор). */
+  private async moveSelectedToFolder(): Promise<void> {
+    const ids = Array.from(this.state.selectedPhotoIds);
+    if (ids.length === 0) return;
+    const folders = this.plugin.db.getFolders();
+    const options = [
+      { value: '0', label: 'Корень (без папки)' },
+      ...folders.map(f => ({ value: String(f.id), label: f.name })),
+    ];
+    const result = await promptFields(this.app, `Перенести файлов: ${ids.length}`, [
+      { key: 'folder', label: 'Папка назначения', type: 'select', options },
+    ]);
+    if (!result) return;
+    const folderId = parseInt(result.folder || '0', 10);
+    try {
+      const token = await this.plugin.syncService.getToken();
+      const toPush: PhotoItem[] = [];
+      for (const id of ids) {
+        const p = this.plugin.db.getPhoto(id);
+        if (!p) continue;
+        p.folder_id = folderId;
+        p.updated_at = new Date().toISOString();
+        p.sync_status = 'local';
+        toPush.push(p);
+      }
+      if (toPush.length > 0) {
+        await this.plugin.syncService.push(token, toPush);
+        for (const p of toPush) p.sync_status = 'synced';
+      }
+      await this.plugin.db.save();
+      this.state.selectedPhotoIds = new Set();
+      this.state.selectionMode = false;
+      new Notice(`Фотобанк: перенесено файлов: ${toPush.length}`);
+      this.render();
     } catch (e: unknown) {
       new Notice(`Фотобанк: ${errorMessage(e)}`);
     }
