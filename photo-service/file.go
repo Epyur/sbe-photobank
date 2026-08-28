@@ -64,7 +64,7 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Оригинал в S3.
-	key := photoS3Key(header.Filename)
+	key, fileID := photoS3Key(header.Filename)
 	size, url, err := s.s3.Put(r.Context(), key, data)
 	if err != nil {
 		log.Printf("s3 put original: %v", err)
@@ -77,7 +77,7 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	thumbAuthor := ""
 	width, height := 0, 0
 	if kind == "image" {
-		thKey, thData, w, h, thErr := makeThumbnail(data, header.Filename)
+		thKey, thData, w, h, thErr := makeThumbnail(data, header.Filename, fileID)
 		if thErr != nil {
 			log.Printf("thumbnail: %v (skip)", thErr)
 		} else {
@@ -136,8 +136,9 @@ func (s *Server) handleUploadThumb(w http.ResponseWriter, r *http.Request) {
 }
 
 // makeThumbnail уменьшает изображение (image/jpeg, png, gif, webp) до 800x800.
-// Возвращает ключ S3, данные JPEG, ширину/высоту исходника.
-func makeThumbnail(data []byte, fileName string) (string, []byte, int, int, error) {
+// Возвращает ключ S3 (в каталоге fileID — уникальный на файл), данные JPEG,
+// ширину/высоту исходника.
+func makeThumbnail(data []byte, fileName string, fileID string) (string, []byte, int, int, error) {
 	src, err := decodeImage(data)
 	if err != nil {
 		return "", nil, 0, 0, err
@@ -162,7 +163,7 @@ func makeThumbnail(data []byte, fileName string) (string, []byte, int, int, erro
 	if ext == "" {
 		ext = ".jpg"
 	}
-	return photoThumbKey("auto", "thumb"+ext), buf.Bytes(), width, height, nil
+	return photoThumbKey(fileID, "thumb"+ext), buf.Bytes(), width, height, nil
 }
 
 func decodeImage(data []byte) (image.Image, error) {

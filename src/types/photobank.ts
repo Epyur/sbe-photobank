@@ -130,6 +130,7 @@ export interface AiDescribeContext {
 
 /** Результат ИИ-описания (промпт возвращает JSON). */
 export interface AiDescribeResult {
+  /** Отображаемое в стоке имя файла — короткое, ёмкое (≤60 симв.). */
   title: string;
   description: string;
   tags: string[];

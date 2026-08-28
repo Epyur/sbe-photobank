@@ -140,8 +140,10 @@ func (s *S3Store) Link(ctx context.Context, key string) (string, error) {
 }
 
 // photoS3Key формирует уникальный ключ для оригинального файла (префикс photo/).
-func photoS3Key(fileName string) string {
-	return fmt.Sprintf("photo/%s/original-%s", randomID(), sanitizeKey(fileName))
+// Возвращает ключ и id файла (для миниатюры в том же каталоге).
+func photoS3Key(fileName string) (string, string) {
+	id := randomID()
+	return fmt.Sprintf("photo/%s/original-%s", id, sanitizeKey(fileName)), id
 }
 
 // photoThumbKey формирует ключ для миниатюры/обложки.
