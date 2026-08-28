@@ -4,7 +4,7 @@
 
 - `manifest.id`: `sbe-photobank`
 - Имя: LogicTEAM.Фотобанк
-- Версия: 0.1.10
+- Версия: 0.1.11
 - Автор: Полищук Евгений (polishchuk@tn.ru)
 - Зависимость от `sbe-core` (при сборке), `sbe-llm` (ИИ-описание/поиск), `sbe-apstore`
   (JWT, новости)
@@ -164,6 +164,8 @@
 
 `apiUrl` (default `https://epyur.fvds.ru`), `syncIntervalMs` (default 300000 — фоновый pull),
 `llmModel` (модель ИИ для описания и поиска; пусто — модель LLM-центра по умолчанию),
+`visionEnabled` (false — при включении превью фото передаётся в ИИ через `completeVision`:
+описываются реальные цвета/материалы; нужна vision-модель в chat-формате),
 `lastAnnouncedVersion` (версия, для которой опубликована новость в ЦУП).
 
 ## 11. Сборка и проверка
