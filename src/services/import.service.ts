@@ -31,12 +31,19 @@ export class PhotobankImportService {
     this.ai = ai;
   }
 
-  /** Импортирует папку вольта (рекурсивно). Возвращает результат. */
+  /** Импортирует папку вольта (рекурсивно). Контекст для ИИ-описания запрашивается
+   *  ОДИН раз на папку (фото в папке, как правило, объединены одной темой). */
   async importFolder(folder: TFolder, targetFolderId: number, aiEnabled: boolean): Promise<ImportResult> {
     const result: ImportResult = { scanned: 0, uploaded: 0, skipped: 0, created: 0 };
     const existingHashes = new Set(
       this.db.getAllPhotos().map(p => p.content_hash).filter(h => h),
     );
+
+    // Один общий контекст для ИИ-описания всех файлов папки.
+    let aiCtx: AiDescribeContext = { content: '', event: '', location: '', people: '', purpose: '' };
+    if (aiEnabled) {
+      aiCtx = await this.collectContext(folder.name || 'папка');
+    }
 
     // Создаём папки банка для подпапок вольта: имя подпапки → папка банка в targetFolderId.
     const bankFolderBySub = new Map<string, number>();
@@ -58,14 +65,14 @@ export class PhotobankImportService {
 
     for (const child of folder.children) {
       if (child instanceof TFile) {
-        await this.importFile(child, targetFolderId, existingHashes, result, aiEnabled);
+        await this.importFile(child, targetFolderId, existingHashes, result, aiEnabled, aiCtx);
       }
       if (child instanceof TFolder) {
         // Загружаем файлы подпапки в соответствующую папку банка.
         const bankId = bankFolderBySub.get(child.name) || targetFolderId;
         for (const file of child.children) {
           if (file instanceof TFile) {
-            await this.importFile(file, bankId, existingHashes, result, aiEnabled);
+            await this.importFile(file, bankId, existingHashes, result, aiEnabled, aiCtx);
           }
         }
       }
@@ -79,6 +86,7 @@ export class PhotobankImportService {
     existingHashes: Set<string>,
     result: ImportResult,
     aiEnabled: boolean,
+    aiCtx: AiDescribeContext,
   ): Promise<void> {
     const ext = file.extension.toLowerCase();
     const kind = this.kindOf(ext);
@@ -100,10 +108,6 @@ export class PhotobankImportService {
       const up = await this.sync.uploadFile(content, file.name, folderId, kind, mime);
 
       const schema = this.db.getSchema();
-      let aiCtx: AiDescribeContext = { content: '', purpose: '' };
-      if (aiEnabled) {
-        aiCtx = await this.collectContext(file.name);
-      }
       const aiResult = aiEnabled ? await this.ai.describe({
         fileName: file.name,
         folderName: this.folderName(folderId),
@@ -121,7 +125,7 @@ export class PhotobankImportService {
 
       const now = new Date().toISOString();
       const photo: PhotoItem = {
-        id: 0,
+        id: nextLocalId(),
         folder_id: folderId,
         title: aiResult && aiResult.title ? aiResult.title : this.titleFromName(file.name),
         description: aiResult ? aiResult.description : '',
@@ -221,4 +225,11 @@ export class PhotobankImportService {
     }
     return hex;
   }
+}
+
+/** Уникальный локальный id новой карточки: положительный, не пересекающийся с
+ *  серверными BIGSERIAL. Сервер при push сохранит его (id>0 → UPSERT по id),
+ *  поэтому pull не создаст дубль. */
+export function nextLocalId(): number {
+  return Date.now() + Math.floor(Math.random() * 100000);
 }
