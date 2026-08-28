@@ -107,7 +107,7 @@ export default class SbePhotobankPlugin extends Plugin {
         appId: this.manifest.id,
         appName: this.manifest.name,
         version: this.manifest.version,
-        summary: 'Запущен новый плагин «Фотобанк»: корпоративное хранилище фото и видео. Загружайте материалы, находите их по свободному описанию (умный поиск с ИИ), собирайте подборки и делитесь ссылками.',
+        summary: 'Запущен новый плагин «LogicTEAM.Фотобанк»: корпоративное хранилище фото и видео. Загружайте материалы, находите их по свободному описанию (умный поиск с ИИ), собирайте подборки и делитесь ссылками.',
       });
       this.settings.lastAnnouncedVersion = this.manifest.version;
       await this.saveSettings();

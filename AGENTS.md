@@ -1,0 +1,111 @@
+# AGENTS.md — sbe-photobank (LogicTEAM.Фотобанк)
+
+SBE-плагин «Фотобанк»: внутренний корпоративный сток-фотобанк. Данные и файлы на сервере
+(photo-service + S3 `sbe-photo`), Obsidian-плагин — клиент/кэш метаданных. ИИ-описание и
+LLM-fallback поиска — через sbe-llm (клиент).
+
+**Бэк — в этой же папке** (`photo-service/`, 2026-08-28, Этап 1-2) — на отдельной ветке
+`backend` (main — чистый релизный срез кода плагина, без бэка; см. правило «Бэки в папках
+плагинов» в корневом `plugins/AGENTS.md`).
+
+## Назначение (текущее)
+
+- **Сервер — канон**, локальный кэш метаданных `yourbase/sbe_photobank/photos_data.json`
+  (`{folders, photos, groups, schema}`). Синхронизация через JWT из ЦУП
+  (`getService('sbe-apstore').auth.getToken('photo')`): push `/api/photo/sync/push`,
+  pull `/api/photo/sync/pull`, фоновый pull по расписанию (`syncIntervalMs`, default 5 мин).
+- **Файлы в S3** через photo-service (`POST /api/photo/file`, `POST /api/photo/thumb`);
+  скачивание/ссылки — через `GET /api/photo/file?key=...` и `GET /api/photo/file-link?key=...`
+  (presigned `rclone link`). Бакет `sbe-photo` приватный — прямой `file_url` в браузере не открывается.
+- **ИИ-описание при загрузке**: пользователь даёт контекст → `getService('sbe-llm')` → расширенное
+  описание/теги/категория/свои поля. Vision у sbe-llm нет. Если sbe-llm недоступен — ручное заполнение.
+- **Поиск**: серверный FTS + LLM-fallback при малом результате (`AiDescribeService.expandQuery`).
+- **Импорт папки вольта**: `PhotobankImportService.importFolder` — рекурсивный обход медиа,
+  подпапки → папки банка, дедуп по SHA-256 (`content_hash`).
+- **Права**: роли SBE (viewer/commenter/editor/admin), по умолчанию всё закрыто; доступ на папки
+  (email или группа), наследование вниз; точечный override файла (grant/deny). Видимость и роль —
+  две независимые оси.
+- **Соцслой**: комментарии, лайки, избранное, «недавние», счётчик скачиваний.
+- **Точка входа** — магазин: «Установленные → Открыть» (`publishService('sbe-photobank', {open})`).
+
+## Структура
+
+| Файл | Что это |
+|---|---|
+| `src/main.ts` | `SbePhotobankPlugin`: настройки, БД, syncService, aiService, importService, view, publishService, фоновый pull, новость в «Новости» ЦУП |
+| `src/database/photobank-db.ts` | `PhotobankDatabase`: кэш JSON, mergeFromServer (LWW), дерево папок, pruneMissing |
+| `src/services/sync.service.ts` | `PhotobankSyncService`: push/pull/uploadFile/uploadThumb/downloadFile/getFileLink/search, JWT, multipart, таймауты, 401/403 |
+| `src/services/ai-describe.service.ts` | `AiDescribeService`: ИИ-описание через sbe-llm (`completeJson`), `expandQuery` (LLM-fallback поиска), graceful degradation |
+| `src/services/import.service.ts` | `PhotobankImportService`: импорт папки вольта, подпапки→папки банка, SHA-256 дедуп, ИИ-контекст через prompt |
+| `src/ui/photobank-view.ts` | `PhotobankView`: фасад «LogicLAB.Фотобанк» (топбар+сайдбар+сетка), карточка файла, загрузка, импорт, управление папками/правами (модал) |
+| `src/ui/settings-tab.ts` | Настройки: apiUrl + разделы «Права доступа», «Группы», «Схема своих полей» (admin) |
+| `src/types/photobank.ts` | `PhotoItem`, `PhotoFolder`, `PhotoGroup`, `SchemaField`, `PhotoComment`, `AiDescribe*`, ответы сервера |
+| `src/styles.css` | Классы `tn-photo-*` на семантических токенах |
+| `photo-service/` | Go-сервер (ветка `backend`), см. `photo-service/AGENTS.md` |
+
+## Настройки (data.json)
+
+`apiUrl` (default `https://epyur.fvds.ru`), `syncIntervalMs` (default 300000),
+`lastAnnouncedVersion` (версия, для которой опубликована новость в ЦУП).
+
+## Правила
+
+- `catch(e: unknown)` + `errorMessage()`; `requestUrl()`; `window.setTimeout()`; без `any`;
+  UI на русском; автор — Полищук Евгений (polishchuk@tn.ru). Классы `tn-photo-*` / `tn-btn*`
+  / `tn-table` на семантических токенах sbe-core.
+- Коммиты/пуши — только по явной команде пользователя.
+- **«Фиксируй» = поднять версию (+0.0.1 в `manifest.json` и `package.json`), обновить
+  документацию, подготовить сообщение для коммита и СПРОСИТЬ подтверждение commit/push.**
+  Не поднимать версию плагина при коммите чисто бэковых изменений в `photo-service/`
+  (ветка `backend`), если сам плагин не менялся. Суффикс `b` на версии, пока backend не
+  синхронизирован с main (см. правило в корневом AGENTS.md).
+- Зависимости Go — только свободные (MIT/BSD/Apache).
+
+## История работ
+
+### 2026-08-28 — v0.1.2 (переименование UI)
+- Переименование в UI: «Фотобанк» → **«LogicTEAM.Фотобанк»** (manifest name, заголовок
+  фасада, getDisplayText, getServiceName в sbe-core bridge.ts, новость ЦУП, комментарий
+  SbePhotobankApi). Команда «Фиксируй»: версия 0.1.1 → **0.1.2** (manifest + package.json),
+  пересборка `main.js`. Реестр: hashes + name обновлены, синхронизирован на сервер.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK.
+
+### 2026-08-28 — v0.1.1 (фиксация)
+- Команда «Фиксируй»: версия 0.1.0 → **0.1.1** (manifest + package.json), пересборка `main.js`.
+- Документация: AGENTS.md, specification.md, README.md плагина; центральный AGENTS.md
+  (карта плагинов); photo-service/AGENTS.md, docker/AGENTS.md, auth-service/AGENTS.md.
+- Реестр: hashes sbe-photobank обновлены (manifest 0.1.1), registry.json синхронизирован
+  на сервер (публичный `/registry.json` отдаёт новый manifest-хеш). ВАЖНО: при первой
+  правке hashes случайно заменились у sbe-dashboards (edit совпал с первым блоком) —
+  восстановлены и проверены по публичному реестру.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK.
+
+### 2026-08-28 — v0.1.0 (создание)
+- Дизайн: `docs/superpowers/specs/2026-08-28-sbe-photobank-design.md` (брейнсторм по базису
+  Picvario DAM), план: `docs/superpowers/plans/2026-08-28-sbe-photobank-plan.md`.
+- **Этап 1 — photo-service** (Go, БД `photo`): карточки (push/pull, `custom` JSONB), файлы в
+  S3 через rclone (`sbe-photo`), миниатюры изображений (Go-ресайз `golang.org/x/image`,
+  BSD-3-Clause), обложки видео/RAW, поиск FTS, папки+права (email/группы, наследование вниз),
+  override (grant/deny), группы, схема своих полей, комментарии/лайки/избранное/недавние/
+  счётчик. `go build`/`go vet` EXIT=0.
+- **Этап 2 — деплой + E2E**: залит на VDS, compose/Caddy `/api/photo/*`/`.env`/auth-seed
+  добавлены, бакет `sbe-photo` создан, app-пользователь `photo_app` создан, Caddy пересоздан.
+  E2E зелёный (health/401/папки+права/загрузка PNG+миниатюра/push-pull/FTS/лайки/комментарии/
+  избранное/недавние/счётчик/presigned-ссылка/группы/override/schema). Фиксы при деплое:
+  scan timestamptz→time.Time в папках; пустые импорты `_ "image/png"`/`_ "image/gif"`.
+- **Этап 3 — плагин**: каркас по sbe-documents, фасад «LogicLAB.Фотобанк», сетка карточек,
+  карточка файла (метаданные/свои поля/комментарии/лайк/ссылка), загрузка и импорт папки
+  вольта с ИИ-описанием, фоновый pull, права/группы/схема в настройках. `npx tsc --noEmit`
+  EXIT=0, `npm run build` OK. `sbe-core`: `SbePhotobankApi` + `'sbe-photobank'` +
+  getServiceName «Фотобанк» (аддитивно).
+- **Этап 4 — реестр + git**: запись `sbe-photobank` (hashes) в registry.json, синхронизирован
+  на сервер; community-plugins.json дополнен; репо `Epyur/sbe-photobank` (main — релизный
+  срез, backend — с photo-service).
+- **Этап 5 — документация**: specification.md + AGENTS.md плагина, центральный AGENTS.md.
+
+## Статистика ошибок и отступлений
+
+- Нарушений правил нет: 0 `any`, 0 `fetch`, 0 инлайн-стилей (отступы дерева папок — CSS-классы
+  `tn-photo-depth-N`), `window.setTimeout` корректен, все `catch(e: unknown)` + `errorMessage()`.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK (без предупреждений).
+- Go: `go build`/`go vet` EXIT=0.
