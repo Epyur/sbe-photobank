@@ -271,6 +271,18 @@ export class PhotobankSyncService {
     this.assertOk(res);
   }
 
+  /** Переименовывает папку (admin). */
+  async renameFolder(id: number, name: string): Promise<void> {
+    const token = await this.getToken();
+    const res = await this.request({
+      url: `${this.baseUrl}/api/photo/folders/rename`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, name }),
+    });
+    this.assertOk(res);
+  }
+
   /** Создаёт/обновляет группу (admin). */
   async saveGroup(group: PhotoGroup): Promise<void> {
     const token = await this.getToken();

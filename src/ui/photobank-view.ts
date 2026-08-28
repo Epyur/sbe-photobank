@@ -29,6 +29,8 @@ export class PhotobankView extends ItemView {
     selectedPhotoIds: Set<number>;
     /** Сайдбар свёрнут (паттерн фасада LogicTEAM, как в sbe-documents). */
     sidebarCollapsed: boolean;
+    /** Развёрнутые папки в дереве (по умолчанию пусто — все свёрнуты). */
+    expandedFolders: Set<number>;
   };
 
   constructor(leaf: WorkspaceLeaf, plugin: SbePhotobankPlugin) {
@@ -43,6 +45,7 @@ export class PhotobankView extends ItemView {
       selectionMode: false,
       selectedPhotoIds: new Set(),
       sidebarCollapsed: false,
+      expandedFolders: new Set(),
     };
   }
 
@@ -143,17 +146,6 @@ export class PhotobankView extends ItemView {
     moveBtn.disabled = this.state.selectedPhotoIds.size === 0;
     moveBtn.addEventListener('click', () => void this.moveSelectedToFolder());
 
-    const syncBtn = topbar.createEl('button', { text: '🔄', cls: 'tn-btn tn-btn-ghost', attr: { title: 'Синхронизировать' } });
-    syncBtn.addEventListener('click', async () => {
-      try {
-        await this.refreshMeta();
-        new Notice('Фотобанк: синхронизировано');
-        this.render();
-      } catch (e: unknown) {
-        new Notice(`Фотобанк: ${errorMessage(e)}`);
-      }
-    });
-
     const body = this.container.createDiv({ cls: 'tn-photo-body' });
     this.renderSidebar(body);
     this.renderContent(body);
@@ -217,16 +209,56 @@ export class PhotobankView extends ItemView {
 
     // Низ сайдбара — управление.
     const actions = sidebar.createDiv({ cls: 'tn-photo-sidebar-actions' });
-    const adminBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
-    adminBtn.createSpan({ text: '⚙️' });
-    adminBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Папки и права' });
-    adminBtn.addEventListener('click', () => void this.openFolderManager());
+
+    const syncBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
+    syncBtn.createSpan({ text: '🔄' });
+    syncBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Синхронизация' });
+    syncBtn.addEventListener('click', async () => {
+      try {
+        await this.refreshMeta();
+        new Notice('Фотобанк: синхронизировано');
+        this.render();
+      } catch (e: unknown) {
+        new Notice(`Фотобанк: ${errorMessage(e)}`);
+      }
+    });
+
+    const createFolderBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
+    createFolderBtn.createSpan({ text: '➕' });
+    createFolderBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Создать папку' });
+    createFolderBtn.addEventListener('click', () => void this.openCreateFolder());
   }
 
   private renderFolderTree(parent: HTMLElement, tree: Map<number, PhotoFolder[]>, parentId: number, depth: number): void {
     const children = tree.get(parentId) || [];
     for (const f of children) {
+      const kids = tree.get(f.id) || [];
+      const hasChildren = kids.length > 0;
+      const expanded = this.state.expandedFolders.has(f.id);
+
       const row = parent.createDiv({ cls: `tn-photo-folder-row tn-photo-depth-${depth}` });
+
+      // Шеврон раскрытия/сворачивания (только у папок с вложенными).
+      if (hasChildren) {
+        const chev = row.createEl('button', {
+          cls: 'tn-photo-folder-chev',
+          text: expanded ? '▾' : '▸',
+          attr: { title: expanded ? 'Свернуть' : 'Развернуть' },
+        });
+        chev.addEventListener('click', (ev: MouseEvent) => {
+          ev.stopPropagation();
+          if (expanded) {
+            this.state.expandedFolders.delete(f.id);
+          } else {
+            this.state.expandedFolders.add(f.id);
+          }
+          this.render();
+        });
+      } else {
+        row.createSpan({ cls: 'tn-photo-folder-chev tn-photo-folder-chev-empty' });
+      }
+
+      // Имя папки (значок + подпись слева).
       const btn = row.createEl('button', {
         cls: `tn-photo-nav-item tn-photo-folder-name${this.state.currentFolderId === f.id && this.state.view === 'folder' ? ' active' : ''}`,
       });
@@ -239,8 +271,23 @@ export class PhotobankView extends ItemView {
         this.state.selectedPhotoId = null;
         this.render();
       });
-      const sub = parent.createDiv({ cls: 'tn-photo-folder-children' });
-      this.renderFolderTree(sub, tree, f.id, depth + 1);
+
+      // Карандаш — «Свойства папки» (переименование, доступы, удаление).
+      const editBtn = row.createEl('button', {
+        cls: 'tn-photo-folder-edit',
+        text: '✏️',
+        attr: { title: 'Свойства папки' },
+      });
+      editBtn.addEventListener('click', (ev: MouseEvent) => {
+        ev.stopPropagation();
+        void this.openFolderSettings(f);
+      });
+
+      // Дочерние папки — только если развёрнута.
+      if (hasChildren && expanded) {
+        const sub = parent.createDiv({ cls: 'tn-photo-folder-children' });
+        this.renderFolderTree(sub, tree, f.id, depth + 1);
+      }
     }
   }
 
@@ -833,10 +880,10 @@ export class PhotobankView extends ItemView {
     return parseInt(result.folder || '0', 10);
   }
 
-  private async openFolderManager(): Promise<void> {
+  private async openCreateFolder(): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
     if (me.role !== 'admin') {
-      new Notice('Фотобанк: управление папками доступно администратору');
+      new Notice('Фотобанк: создание папок доступно администратору');
       return;
     }
     const modalHtml = document.createElement('div');
@@ -861,7 +908,20 @@ export class PhotobankView extends ItemView {
       }
     });
 
-    const modal = new FolderManagerModal(this.app, modalHtml, this.plugin);
+    const modal = new SimpleModal(this.app, modalHtml);
+    modal.open();
+  }
+
+  /** «Свойства папки»: переименование, права доступа, удаление (admin). */
+  private async openFolderSettings(folder: PhotoFolder): Promise<void> {
+    const me = await this.plugin.syncService.getMyPermission();
+    if (me.role !== 'admin') {
+      new Notice('Фотобанк: свойства папок доступны администратору');
+      return;
+    }
+    const modal = new FolderSettingsModal(this.app, this.plugin, folder, () => {
+      void this.refreshMeta().then(() => this.render());
+    });
     modal.open();
   }
 
@@ -903,68 +963,129 @@ export class PhotobankView extends ItemView {
   }
 }
 
-/** Простое модальное окно для управления папками (создание + права на папки). */
-class FolderManagerModal extends Modal {
+/** Простое модальное окно с произвольным содержимым. */
+class SimpleModal extends Modal {
   private content: HTMLElement;
-  private plugin: SbePhotobankPlugin;
 
-  constructor(app: App, content: HTMLElement, plugin: SbePhotobankPlugin) {
+  constructor(app: App, content: HTMLElement) {
     super(app);
     this.content = content;
-    this.plugin = plugin;
   }
 
   override onOpen(): void {
     this.contentEl.empty();
     this.contentEl.appendChild(this.content);
-    const permsBox = this.contentEl.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Права папок' });
-    void this.renderFolderPerms(permsBox);
+  }
+
+  override onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** «Свойства папки»: переименование, права доступа (email/группы), удаление (admin). */
+class FolderSettingsModal extends Modal {
+  private plugin: SbePhotobankPlugin;
+  private folder: PhotoFolder;
+  private onChanged: () => void;
+
+  constructor(app: App, plugin: SbePhotobankPlugin, folder: PhotoFolder, onChanged: () => void) {
+    super(app);
+    this.plugin = plugin;
+    this.folder = folder;
+    this.onChanged = onChanged;
+  }
+
+  override onOpen(): void {
+    this.contentEl.empty();
+    this.titleEl.setText(`Свойства папки: ${this.folder.name}`);
+    this.render();
   }
 
   override onClose(): void {
     this.contentEl.empty();
   }
 
-  private async renderFolderPerms(box: HTMLElement): Promise<void> {
-    const groups = this.plugin.db.getGroups();
-    for (const f of this.plugin.db.getFolders()) {
-      const row = box.createDiv({ cls: 'tn-doc-mb8' });
-      row.createDiv({ cls: 'tn-photo-field-label', text: `📁 ${f.name}` });
+  private render(): void {
+    this.contentEl.empty();
+    const box = this.contentEl.createDiv({ cls: 'tn-card' });
+
+    // Переименование.
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Переименование' });
+    const nameInput = box.createEl('input', { attr: { type: 'text' }, cls: 'tn-doc-input' });
+    nameInput.value = this.folder.name;
+    const renameBtn = box.createEl('button', { text: '💾 Переименовать', cls: 'tn-btn tn-btn-primary tn-photo-mb8' });
+    renameBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) { new Notice('Введите название'); return; }
       try {
-        const perms = await this.plugin.syncService.listFolderPerms(f.id);
-        for (const perm of perms) {
-          const pRow = row.createDiv({ cls: 'tn-photo-field' });
-          pRow.createSpan({ text: `${perm.subject}: ${perm.role}` });
-          const rm = pRow.createEl('button', { text: '✖', cls: 'tn-btn tn-btn-ghost' });
-          rm.addEventListener('click', async () => {
-            try {
-              await this.plugin.syncService.setFolderPerm(f.id, perm.subject, '');
-              await this.renderFolderPerms(box);
-            } catch (e: unknown) {
-              new Notice(`Фотобанк: ${errorMessage(e)}`);
-            }
-          });
-        }
-        const addRow = row.createDiv({ cls: 'tn-photo-field' });
-        const subjectInput = addRow.createEl('input', { attr: { type: 'text', placeholder: 'email или группа' }, cls: 'tn-doc-input' });
-        const roleSelect = addRow.createEl('select', { cls: 'tn-doc-select' });
-        roleSelect.createEl('option', { value: 'viewer', text: 'Просмотр' });
-        roleSelect.createEl('option', { value: 'commenter', text: 'Просмотр + комментарии' });
-        roleSelect.createEl('option', { value: 'editor', text: 'Редактор' });
-        const add = addRow.createEl('button', { text: '➕', cls: 'tn-btn tn-btn-ghost' });
-        add.addEventListener('click', async () => {
-          const subject = subjectInput.value.trim();
-          if (!subject) { new Notice('Введите email или группу'); return; }
+        await this.plugin.syncService.renameFolder(this.folder.id, name);
+        new Notice('Папка переименована');
+        this.onChanged();
+        this.folder.name = name;
+        this.titleEl.setText(`Свойства папки: ${name}`);
+      } catch (e: unknown) {
+        new Notice(`Фотобанк: ${errorMessage(e)}`);
+      }
+    });
+
+    // Права доступа.
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Права доступа' });
+    const permsBox = box.createDiv({ cls: 'tn-photo-mb8' });
+    void this.renderPerms(permsBox);
+
+    // Удаление.
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Удаление' });
+    const delBtn = box.createEl('button', { text: '🗑 Удалить папку', cls: 'tn-btn tn-btn-danger' });
+    delBtn.addEventListener('click', async () => {
+      const confirmed = window.confirm ? window.confirm(`Удалить папку «${this.folder.name}» и все её файлы?`) : true;
+      if (!confirmed) return;
+      try {
+        await this.plugin.syncService.deleteFolder(this.folder.id);
+        new Notice('Папка удалена');
+        this.onChanged();
+        this.close();
+      } catch (e: unknown) {
+        new Notice(`Фотобанк: ${errorMessage(e)}`);
+      }
+    });
+  }
+
+  private async renderPerms(box: HTMLElement): Promise<void> {
+    box.empty();
+    try {
+      const perms = await this.plugin.syncService.listFolderPerms(this.folder.id);
+      for (const perm of perms) {
+        const pRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
+        pRow.createSpan({ text: `${perm.subject}: ${perm.role}` });
+        const rm = pRow.createEl('button', { text: '✖', cls: 'tn-btn tn-btn-ghost' });
+        rm.addEventListener('click', async () => {
           try {
-            await this.plugin.syncService.setFolderPerm(f.id, subject, roleSelect.value);
-            await this.renderFolderPerms(box);
+            await this.plugin.syncService.setFolderPerm(this.folder.id, perm.subject, '');
+            await this.renderPerms(box);
           } catch (e: unknown) {
             new Notice(`Фотобанк: ${errorMessage(e)}`);
           }
         });
-      } catch (e: unknown) {
-        console.warn('Фотобанк: права папки не загружены:', errorMessage(e));
       }
+      const addRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
+      const subjectInput = addRow.createEl('input', { attr: { type: 'text', placeholder: 'email или группа' }, cls: 'tn-doc-input' });
+      const roleSelect = addRow.createEl('select', { cls: 'tn-doc-select' });
+      roleSelect.createEl('option', { value: 'viewer', text: 'Просмотр' });
+      roleSelect.createEl('option', { value: 'commenter', text: 'Просмотр + комментарии' });
+      roleSelect.createEl('option', { value: 'editor', text: 'Редактор' });
+      const add = addRow.createEl('button', { text: '➕', cls: 'tn-btn tn-btn-ghost' });
+      add.addEventListener('click', async () => {
+        const subject = subjectInput.value.trim();
+        if (!subject) { new Notice('Введите email или группу'); return; }
+        try {
+          await this.plugin.syncService.setFolderPerm(this.folder.id, subject, roleSelect.value);
+          await this.renderPerms(box);
+        } catch (e: unknown) {
+          new Notice(`Фотобанк: ${errorMessage(e)}`);
+        }
+      });
+    } catch (e: unknown) {
+      box.createDiv({ cls: 'tn-photo-empty', text: `Не удалось загрузить права: ${errorMessage(e)}` });
     }
   }
 }
