@@ -11,7 +11,7 @@ const KIND_LABELS: Record<string, string> = {
   raw: 'RAW',
 };
 
-/** Фасад «LogicLAB.Фотобанк»: сайдбар (дерево папок, фильтры, разделы) + сетка карточек
+/** Фасад «LogicTEAM.Фотобанк»: сайдбар (дерево папок, фильтры, разделы) + сетка карточек
  *  + карточка файла (метаданные, свои поля, ИИ-описание, комментарии, лайк, ссылка). */
 export class PhotobankView extends ItemView {
   private plugin: SbePhotobankPlugin;
@@ -41,7 +41,7 @@ export class PhotobankView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'LogicLAB.Фотобанк';
+    return 'LogicTEAM.Фотобанк';
   }
 
   getIcon(): string {
@@ -81,7 +81,7 @@ export class PhotobankView extends ItemView {
   render(): void {
     this.container.empty();
     const topbar = this.container.createDiv({ cls: 'tn-photo-topbar' });
-    topbar.createEl('h3', { text: 'LogicLAB.Фотобанк' });
+    topbar.createEl('h3', { text: 'LogicTEAM.Фотобанк' });
 
     const searchInput = topbar.createEl('input', {
       attr: { type: 'text', placeholder: 'Поиск по банку (свободный ввод)…' },
