@@ -27,6 +27,8 @@ export class PhotobankView extends ItemView {
     /** Множественный выбор карточек. */
     selectionMode: boolean;
     selectedPhotoIds: Set<number>;
+    /** Сайдбар свёрнут (паттерн фасада LogicTEAM, как в sbe-documents). */
+    sidebarCollapsed: boolean;
   };
 
   constructor(leaf: WorkspaceLeaf, plugin: SbePhotobankPlugin) {
@@ -40,6 +42,7 @@ export class PhotobankView extends ItemView {
       selectedPhotoId: null,
       selectionMode: false,
       selectedPhotoIds: new Set(),
+      sidebarCollapsed: false,
     };
   }
 
@@ -87,12 +90,15 @@ export class PhotobankView extends ItemView {
 
   render(): void {
     this.container.empty();
+    this.container.toggleClass('tn-photo-collapsed', this.state.sidebarCollapsed);
+
+    // Топбар по паттерну фасада LogicTEAM.
     const topbar = this.container.createDiv({ cls: 'tn-photo-topbar' });
-    topbar.createEl('h3', { text: 'LogicTEAM.Фотобанк' });
+    topbar.createDiv({ cls: 'tn-photo-module-title', text: 'LogicTEAM.Фотобанк' });
 
     const searchInput = topbar.createEl('input', {
       attr: { type: 'text', placeholder: 'Поиск по банку (свободный ввод)…' },
-      cls: 'tn-doc-input',
+      cls: 'tn-doc-input tn-photo-topbar-search',
     });
     searchInput.value = this.state.search;
     searchInput.addEventListener('keydown', async (ev: KeyboardEvent) => {
@@ -113,6 +119,9 @@ export class PhotobankView extends ItemView {
       this.state.kindFilter = kindSelect.value;
       this.render();
     });
+
+    const spacer = topbar.createDiv({ cls: 'tn-photo-spacer' });
+    spacer.empty();
 
     const uploadBtn = topbar.createEl('button', { text: '📥 Загрузить', cls: 'tn-btn tn-btn-primary' });
     uploadBtn.addEventListener('click', () => void this.uploadFiles());
@@ -152,49 +161,65 @@ export class PhotobankView extends ItemView {
 
   private renderSidebar(body: HTMLElement): void {
     const sidebar = body.createDiv({ cls: 'tn-photo-sidebar' });
-    const inner = sidebar.createDiv({ cls: 'tn-photo-sidebar-inner' });
 
-    inner.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Банк' });
-
-    const allBtn = inner.createEl('button', {
-      cls: `tn-photo-nav-btn${this.state.view === 'all' ? ' is-active' : ''}`,
-      text: '🗂 Все файлы',
+    // Кнопка сворачивания сайдбара.
+    const collapseBtn = sidebar.createDiv({ cls: 'tn-photo-collapse' });
+    collapseBtn.createSpan({ text: '▧' });
+    const collapseLabel = collapseBtn.createSpan({ cls: 'tn-photo-collapse-lbl', text: this.state.sidebarCollapsed ? 'Развернуть' : 'Свернуть' });
+    collapseBtn.addEventListener('click', () => {
+      this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+      this.render();
     });
-    allBtn.addEventListener('click', () => {
+
+    const nav = sidebar.createDiv({ cls: 'tn-photo-nav' });
+
+    // Группа «Банк».
+    const bankGroup = nav.createEl('button', { cls: 'tn-photo-grp' });
+    bankGroup.createSpan({ cls: 'tn-photo-grp-ico', text: '🗂' });
+    bankGroup.createSpan({ cls: 'tn-photo-grp-lbl', text: 'Банк' });
+    bankGroup.createSpan({ cls: 'tn-photo-grp-chev', text: '▶' });
+    bankGroup.classList.add('open');
+    const bankSub = nav.createDiv({ cls: 'tn-photo-submenu' });
+    const mkItem = (text: string, icon: string, cls: string, onClick: () => void): void => {
+      const item = bankSub.createEl('button', { cls: `tn-photo-nav-item${cls}` });
+      item.createSpan({ cls: 'tn-photo-nav-ico', text: icon });
+      item.createSpan({ cls: 'tn-photo-nav-lbl', text });
+      item.addEventListener('click', onClick);
+    };
+    mkItem('Все файлы', '🗂', this.state.view === 'all' ? ' active' : '', () => {
       this.state.view = 'all';
       this.state.search = '';
       this.state.selectedPhotoId = null;
       this.render();
     });
-
-    const favBtn = inner.createEl('button', {
-      cls: `tn-photo-nav-btn${this.state.view === 'favorites' ? ' is-active' : ''}`,
-      text: '⭐ Избранное',
-    });
-    favBtn.addEventListener('click', () => {
+    mkItem('Избранное', '⭐', this.state.view === 'favorites' ? ' active' : '', () => {
       this.state.view = 'favorites';
       this.state.search = '';
       this.state.selectedPhotoId = null;
       this.render();
     });
-
-    const recentBtn = inner.createEl('button', {
-      cls: `tn-photo-nav-btn${this.state.view === 'recent' ? ' is-active' : ''}`,
-      text: '🕒 Недавние',
-    });
-    recentBtn.addEventListener('click', () => {
+    mkItem('Недавние', '🕒', this.state.view === 'recent' ? ' active' : '', () => {
       this.state.view = 'recent';
       this.state.search = '';
       this.state.selectedPhotoId = null;
       this.render();
     });
 
-    inner.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Папки' });
+    // Группа «Папки» — дерево.
+    const folderGroup = nav.createEl('button', { cls: 'tn-photo-grp' });
+    folderGroup.createSpan({ cls: 'tn-photo-grp-ico', text: '📁' });
+    folderGroup.createSpan({ cls: 'tn-photo-grp-lbl', text: 'Папки' });
+    folderGroup.createSpan({ cls: 'tn-photo-grp-chev', text: '▶' });
+    folderGroup.classList.add('open');
+    const folderSub = nav.createDiv({ cls: 'tn-photo-submenu' });
     const tree = this.plugin.db.folderTree();
-    this.renderFolderTree(inner, tree, 0, 0);
+    this.renderFolderTree(folderSub, tree, 0, 0);
 
-    const adminTools = inner.createDiv();
-    const adminBtn = adminTools.createEl('button', { cls: 'tn-photo-nav-btn', text: '⚙️ Папки и права' });
+    // Низ сайдбара — управление.
+    const actions = sidebar.createDiv({ cls: 'tn-photo-sidebar-actions' });
+    const adminBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
+    adminBtn.createSpan({ text: '⚙️' });
+    adminBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Папки и права' });
     adminBtn.addEventListener('click', () => void this.openFolderManager());
   }
 
@@ -203,9 +228,10 @@ export class PhotobankView extends ItemView {
     for (const f of children) {
       const row = parent.createDiv({ cls: `tn-photo-folder-row tn-photo-depth-${depth}` });
       const btn = row.createEl('button', {
-        cls: `tn-photo-nav-btn tn-photo-folder-name${this.state.currentFolderId === f.id && this.state.view === 'folder' ? ' is-active' : ''}`,
-        text: `📁 ${f.name}`,
+        cls: `tn-photo-nav-item tn-photo-folder-name${this.state.currentFolderId === f.id && this.state.view === 'folder' ? ' active' : ''}`,
       });
+      btn.createSpan({ cls: 'tn-photo-nav-ico', text: '📁' });
+      btn.createSpan({ cls: 'tn-photo-nav-lbl', text: f.name });
       btn.addEventListener('click', () => {
         this.state.currentFolderId = f.id;
         this.state.view = 'folder';
@@ -667,7 +693,13 @@ export class PhotobankView extends ItemView {
       new Notice('Фотобанк: загрузка доступна редакторам и администраторам');
       return;
     }
-    const folderId = this.state.currentFolderId || 0;
+    let folderId = this.state.currentFolderId;
+    // Если папка не выбрана в сайдбаре (вид не «folder» или корень) — спросить.
+    if (this.state.view !== 'folder' || !folderId) {
+      const chosen = await this.chooseTargetFolder('Загрузка файлов');
+      if (chosen === null) return;
+      folderId = chosen;
+    }
     const schema = this.plugin.db.getSchema();
     const ctx = await this.collectUploadContext();
     const input = document.createElement('input');
@@ -773,13 +805,32 @@ export class PhotobankView extends ItemView {
       new Notice(`Фотобанк: папка «${folderName}» не найдена в вольте`);
       return;
     }
-    const targetFolderId = this.state.currentFolderId || 0;
+    let targetFolderId = this.state.currentFolderId;
+    if (this.state.view !== 'folder' || !targetFolderId) {
+      const chosen = await this.chooseTargetFolder('Импорт: папка назначения');
+      if (chosen === null) return;
+      targetFolderId = chosen;
+    }
     const aiEnabled = await this.plugin.aiService.isAvailable();
     new Notice('Фотобанк: импорт начат…');
     const importRes = await this.plugin.importService.importFolder(folder, targetFolderId, aiEnabled);
     await this.refreshMeta();
     this.render();
     new Notice(`Фотобанк: импорт завершён — просмотрено ${importRes.scanned}, создано ${importRes.created}, пропущено ${importRes.skipped}`);
+  }
+
+  /** Выбор целевой папки банка (для загрузки/импорта). Возвращает folder_id или null при отмене. */
+  private async chooseTargetFolder(prefix: string): Promise<number | null> {
+    const folders = this.plugin.db.getFolders();
+    const options = [
+      { value: '0', label: 'Корень (без папки)' },
+      ...folders.map(f => ({ value: String(f.id), label: f.name })),
+    ];
+    const result = await promptFields(this.app, prefix, [
+      { key: 'folder', label: 'Папка назначения', type: 'select', options },
+    ]);
+    if (!result) return null;
+    return parseInt(result.folder || '0', 10);
   }
 
   private async openFolderManager(): Promise<void> {
