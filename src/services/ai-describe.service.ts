@@ -5,6 +5,17 @@ import type { AiDescribeContext, AiDescribeResult, SchemaField } from '../types/
 /** ИИ-описание при загрузке через sbe-llm (клиент). Vision у центра нет — описание
  *  строится из контекста пользователя + имени файла + авто-метаданных. */
 export class AiDescribeService {
+  private getModel: () => string;
+
+  constructor(getModel: () => string) {
+    this.getModel = getModel;
+  }
+
+  private model(): string | undefined {
+    const m = this.getModel().trim();
+    return m ? m : undefined;
+  }
+
   /** Готов ли LLM-центр. */
   async isAvailable(): Promise<boolean> {
     try {
@@ -56,7 +67,7 @@ ${schemaBlock}
 - Цель использования: ${input.context.purpose || 'не указано'}`;
 
     try {
-      const result = await llm.completeJson<Partial<AiDescribeResult>>(system, user, { temperature: 0.4 });
+      const result = await llm.completeJson<Partial<AiDescribeResult>>(system, user, { temperature: 0.4, model: this.model() });
       return {
         title: (result.title || '').trim().slice(0, 120) || '',
         description: (result.description || '').trim() || '',
@@ -87,7 +98,7 @@ ${schemaBlock}
     const system = 'Ты помогаешь искать фото в корпоративном фотобанке. По свободному запросу пользователя ' +
       'верни ТОЛЬКО JSON: {"keywords": ["3-6 ключевых слов/тегов для полнотекстового поиска"]}. Слова — на русском, краткие.';
     try {
-      const result = await llm.completeJson<{ keywords?: unknown }>(system, `Запрос: ${q}`, { temperature: 0.3 });
+      const result = await llm.completeJson<{ keywords?: unknown }>(system, `Запрос: ${q}`, { temperature: 0.3, model: this.model() });
       const keywords = Array.isArray(result.keywords)
         ? result.keywords.map(k => String(k).trim()).filter(Boolean).slice(0, 8)
         : [];

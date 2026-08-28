@@ -13,6 +13,8 @@ export interface SbePhotobankSettings {
   apiUrl: string;
   /** Интервал фонового pull метаданных, мс. */
   syncIntervalMs: number;
+  /** Модель ИИ для описания и умного поиска (sbe-llm). Пусто — модель LLM-центра по умолчанию. */
+  llmModel: string;
   /** Версия, для которой уже опубликована новость в «Новости» ЦУП. */
   lastAnnouncedVersion: string;
 }
@@ -20,6 +22,7 @@ export interface SbePhotobankSettings {
 const DEFAULT_SETTINGS: SbePhotobankSettings = {
   apiUrl: 'https://epyur.fvds.ru',
   syncIntervalMs: 5 * 60 * 1000,
+  llmModel: '',
   lastAnnouncedVersion: '',
 };
 
@@ -36,7 +39,7 @@ export default class SbePhotobankPlugin extends Plugin {
     this.db = new PhotobankDatabase(this.app);
     await this.db.init();
     this.syncService = new PhotobankSyncService(this.db, () => this.settings.apiUrl);
-    this.aiService = new AiDescribeService();
+    this.aiService = new AiDescribeService(() => this.settings.llmModel);
     this.importService = new PhotobankImportService(this.app, this.db, this.syncService, this.aiService);
 
     this.registerView(
