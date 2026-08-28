@@ -289,10 +289,10 @@ export class PhotobankView extends ItemView {
     }
   }
 
-  /** Скачивает миниатюру и показывает как <img>. */
+  /** Скачивает миниатюру и показывает как <img>. Просмотр превью не считается скачиванием. */
   private async loadThumb(thumbKey: string, container: HTMLElement): Promise<void> {
     try {
-      const data = await this.plugin.syncService.downloadFile(thumbKey);
+      const data = await this.plugin.syncService.downloadFile(thumbKey, true);
       const blob = new Blob([data]);
       const url = URL.createObjectURL(blob);
       const img = container.createEl('img', { cls: 'tn-photo-card-media' });
@@ -391,7 +391,7 @@ export class PhotobankView extends ItemView {
       return;
     }
     try {
-      const data = await this.plugin.syncService.downloadFile(key);
+      const data = await this.plugin.syncService.downloadFile(key, true);
       const blob = new Blob([data]);
       const url = URL.createObjectURL(blob);
       if (p.kind === 'video') {

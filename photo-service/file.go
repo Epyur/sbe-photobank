@@ -211,7 +211,11 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.incDownloadCount(r.Context(), key)
+	// Просмотр превью/миниатюры (`view=1`) не считается скачиванием — счётчик
+	// download_count растёт только при явном скачивании файла.
+	if r.URL.Query().Get("view") != "1" {
+		s.incDownloadCount(r.Context(), key)
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Access-Control-Allow-Origin", "*")

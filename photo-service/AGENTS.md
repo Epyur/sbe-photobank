@@ -65,6 +65,14 @@ docker compose logs photo --tail 20
 
 ## История
 
+- **2026-08-29 — счётчик скачиваний (view=1):**
+  `GET /api/photo/file?key=...&view=1` не инкрементит `download_count` — просмотр
+  превью/миниатюры не считается скачиванием. Инкремент только при явном скачивании
+  (без `view`). Причина: сетка/превью грузили файлы через обычный download, и у файла
+  набегало десятки «скачиваний» без явных действий. Накрученные счётчики сброшены
+  (`UPDATE photos SET download_count=0`). Задеплоено (`docker compose up -d --build photo`),
+  `go build`/`go vet` EXIT=0.
+
 - **2026-08-28 — Этап 2: деплой на VDS + E2E.**
   Залит в `/opt/mailers/photo-service/`, добавлены `photo-db`/`photo` в compose,
   `/api/photo/*` в Caddyfile (в `./caddy/Caddyfile`), `PHOTO_*` в `.env`, seed `photo`

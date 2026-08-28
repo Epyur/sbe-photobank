@@ -4,7 +4,7 @@
 
 - `manifest.id`: `sbe-photobank`
 - Имя: LogicTEAM.Фотобанк
-- Версия: 0.1.4
+- Версия: 0.1.5
 - Автор: Полищук Евгений (polishchuk@tn.ru)
 - Зависимость от `sbe-core` (при сборке), `sbe-llm` (ИИ-описание/поиск), `sbe-apstore`
   (JWT, новости)
@@ -79,8 +79,9 @@
 ### POST /api/photo/thumb — загрузка обложки для видео/RAW (editor+)
 - `multipart/form-data`: `file` + `photo_id`. Ответ: `{thumb_key, thumb_author:"user"}`.
 
-### GET /api/photo/file?key=... — скачивание файла из S3 (viewer+, в рамках видимого)
-- Увеличивает `download_count` фото.
+### GET /api/photo/file?key=...&view=1 — скачивание файла из S3 (viewer+, в рамках видимого)
+- `view=1` — просмотр превью/миниатюры, `download_count` НЕ растёт.
+- Без `view` — явное скачивание, `download_count` +1.
 
 ### GET /api/photo/file-link?key=... — временная публичная ссылка (viewer+)
 - `rclone link --expire 7d`; ответ `{"url": ...}`.
