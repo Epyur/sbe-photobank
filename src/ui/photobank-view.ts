@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf, Notice, TFolder, App, Modal } from 'obsidian';
 import type SbePhotobankPlugin from '../main';
 import type { PhotoItem, PhotoFolder, PhotoGroup, SchemaField, AiDescribeContext } from '../types/photobank';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
+import { promptFields } from './prompt-modal';
 
 export const SBE_PHOTOBANK_VIEW_TYPE = 'sbe-photobank-view';
 
@@ -485,17 +486,22 @@ export class PhotobankView extends ItemView {
   }
 
   private async collectUploadContext(): Promise<AiDescribeContext> {
-    const content = window.prompt('Что на кадре (контекст для ИИ-описания)? Можно оставить пустым.');
-    const event = window.prompt('Событие/съёмка?');
-    const location = window.prompt('Локация?');
-    const people = window.prompt('Персоны?');
-    const purpose = window.prompt('Цель использования?');
+    const result = await promptFields(this.app, 'Контекст для ИИ-описания', [
+      { key: 'content', label: 'Что на кадре', placeholder: 'Объект, сцена, детали. Можно пусто.' },
+      { key: 'event', label: 'Событие/съёмка', placeholder: 'Например: «съёмка продукции», «корпоратив». Можно пусто.' },
+      { key: 'location', label: 'Локация', placeholder: 'Город, объект, цех… Можно пусто.' },
+      { key: 'people', label: 'Персоны', placeholder: 'Имена или должности. Можно пусто.' },
+      { key: 'purpose', label: 'Цель использования', placeholder: 'Например: «для презентации». Можно пусто.' },
+    ]);
+    if (!result) {
+      return { content: '', event: '', location: '', people: '', purpose: '' };
+    }
     return {
-      content: (content || '').trim(),
-      event: (event || '').trim(),
-      location: (location || '').trim(),
-      people: (people || '').trim(),
-      purpose: (purpose || '').trim(),
+      content: (result.content || '').trim(),
+      event: (result.event || '').trim(),
+      location: (result.location || '').trim(),
+      people: (result.people || '').trim(),
+      purpose: (result.purpose || '').trim(),
     };
   }
 
@@ -557,20 +563,24 @@ export class PhotobankView extends ItemView {
       new Notice('Фотобанк: импорт доступен редакторам и администраторам');
       return;
     }
-    const folderName = window.prompt('Имя папки вольта для импорта (подпапка вашей vault):');
-    if (!folderName || !folderName.trim()) return;
-    const folder = this.app.vault.getAbstractFileByPath(folderName.trim()) as TFolder | null;
+    const result = await promptFields(this.app, 'Импорт папки вольта', [
+      { key: 'path', label: 'Папка вольта', placeholder: 'Например: Фото/Мероприятия (подпапка vault)' },
+    ]);
+    if (!result) return;
+    const folderName = (result.path || '').trim();
+    if (!folderName) return;
+    const folder = this.app.vault.getAbstractFileByPath(folderName) as TFolder | null;
     if (!folder || !(folder instanceof TFolder)) {
-      new Notice(`Фотобанк: папка «${folderName.trim()}» не найдена в вольте`);
+      new Notice(`Фотобанк: папка «${folderName}» не найдена в вольте`);
       return;
     }
     const targetFolderId = this.state.currentFolderId || 0;
     const aiEnabled = await this.plugin.aiService.isAvailable();
     new Notice('Фотобанк: импорт начат…');
-    const result = await this.plugin.importService.importFolder(folder, targetFolderId, aiEnabled);
+    const importRes = await this.plugin.importService.importFolder(folder, targetFolderId, aiEnabled);
     await this.refreshMeta();
     this.render();
-    new Notice(`Фотобанк: импорт завершён — просмотрено ${result.scanned}, создано ${result.created}, пропущено ${result.skipped}`);
+    new Notice(`Фотобанк: импорт завершён — просмотрено ${importRes.scanned}, создано ${importRes.created}, пропущено ${importRes.skipped}`);
   }
 
   private async openFolderManager(): Promise<void> {

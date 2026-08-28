@@ -63,6 +63,18 @@ LLM-fallback поиска — через sbe-llm (клиент).
 
 ## История работ
 
+### 2026-08-28 — v0.1.3 (фиксы UX: модальные окна вместо prompt, модель ИИ)
+- **window.prompt заменён на модальные окна** (`src/ui/prompt-modal.ts` — `promptFields`):
+  в Obsidian/Electron `prompt()` не поддерживается, кнопки «Загрузить»/«Импорт папки»
+  падали с `prompt() is not supported`. Теперь контекст для ИИ-описания, имя папки при
+  импорте и создание группы запрашиваются через Modal.
+- **Настройка «Модель ИИ»** в настройках плагина (`llmModel` в data.json, раздел
+  «ИИ (LLM-центр)»): модель передаётся в sbe-llm при ИИ-описании и расширении поиска
+  (`AiDescribeService` принимает `getModel`). Пусто — модель LLM-центра по умолчанию.
+- Версия 0.1.2 → **0.1.3** (manifest + package.json), пересборка `main.js`.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK. Реестр: hashes обновлены,
+  синхронизированы на сервер.
+
 ### 2026-08-28 — v0.1.2 (переименование UI)
 - Переименование в UI: «Фотобанк» → **«LogicTEAM.Фотобанк»** (manifest name, заголовок
   фасада, getDisplayText, getServiceName в sbe-core bridge.ts, новость ЦУП, комментарий

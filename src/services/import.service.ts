@@ -1,5 +1,6 @@
 import { App, Notice, TFile, TFolder } from 'obsidian';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
+import { promptFields } from '../ui/prompt-modal';
 import type { PhotobankSyncService } from './sync.service';
 import type { PhotobankDatabase } from '../database/photobank-db';
 import type { AiDescribeService } from './ai-describe.service';
@@ -156,32 +157,25 @@ export class PhotobankImportService {
     }
   }
 
-  /** Запрашивает у пользователя контекст для ИИ-описания (модальный промпт Obsidian). */
+  /** Запрашивает у пользователя контекст для ИИ-описания (модальное окно). */
   private async collectContext(fileName: string): Promise<AiDescribeContext> {
-    const content = await this.promptModal(
-      `Что на кадре «${fileName}»?`,
-      'Опиши кратко содержимое кадра (что за объект, сцена, детали). Можно пусто.',
-    );
-    const event = await this.promptModal(
-      'Событие/съёмка?',
-      'Например: «День открытых дверей», «съёмка продукции», «корпоратив». Можно пусто.',
-    );
-    const location = await this.promptModal('Локация?', 'Город, объект, цех… Можно пусто.');
-    const people = await this.promptModal('Персоны?', 'Имена или должности на кадре. Можно пусто.');
-    const purpose = await this.promptModal('Цель использования?', 'Например: «для отчёта», «для презентации». Можно пусто.');
+    const result = await promptFields(this.app, `Контекст для ИИ-описания «${fileName}»`, [
+      { key: 'content', label: 'Что на кадре', placeholder: 'Объект, сцена, детали. Можно пусто.' },
+      { key: 'event', label: 'Событие/съёмка', placeholder: 'Например: «День открытых дверей», «съёмка продукции». Можно пусто.' },
+      { key: 'location', label: 'Локация', placeholder: 'Город, объект, цех… Можно пусто.' },
+      { key: 'people', label: 'Персоны', placeholder: 'Имена или должности на кадре. Можно пусто.' },
+      { key: 'purpose', label: 'Цель использования', placeholder: 'Например: «для отчёта», «для презентации». Можно пусто.' },
+    ]);
+    if (!result) {
+      return { content: '', event: '', location: '', people: '', purpose: '' };
+    }
     return {
-      content: content || '',
-      event: event || '',
-      location: location || '',
-      people: people || '',
-      purpose: purpose || '',
+      content: result.content || '',
+      event: result.event || '',
+      location: result.location || '',
+      people: result.people || '',
+      purpose: result.purpose || '',
     };
-  }
-
-  /** Простейший модальный ввод через window.prompt (Obsidian). Возвращает строку (или ''). */
-  private async promptModal(message: string, placeholder: string): Promise<string> {
-    const value = window.prompt(`${message}\n${placeholder}`);
-    return (value || '').trim();
   }
 
   private folderName(folderId: number): string {

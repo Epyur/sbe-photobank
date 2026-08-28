@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type SbePhotobankPlugin from '../main';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
+import { promptFields } from './prompt-modal';
 
 const ROLE_LABELS: Record<string, string> = {
   viewer: 'Просмотр',
@@ -33,6 +34,21 @@ export class PhotobankSettingsTab extends PluginSettingTab {
         .setValue(this.plugin.settings.apiUrl)
         .onChange(async (value) => {
           this.plugin.settings.apiUrl = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setHeading()
+      .setName('ИИ (LLM-центр)');
+
+    new Setting(containerEl)
+      .setName('Модель ИИ')
+      .setDesc('Модель для ИИ-описания при загрузке и умного поиска. Используется через плагин «SBE LLM Center» (sbe-llm). Пусто — модель по умолчанию LLM-центра.')
+      .addText(text => text
+        .setPlaceholder('deepseek-v4-pro')
+        .setValue(this.plugin.settings.llmModel)
+        .onChange(async (value) => {
+          this.plugin.settings.llmModel = value.trim();
           await this.plugin.saveSettings();
         }));
 
@@ -197,10 +213,14 @@ export class PhotobankSettingsTab extends PluginSettingTab {
       }
       const addBtn = container.createEl('button', { text: '➕ Создать группу', cls: 'tn-btn tn-btn-primary' });
       addBtn.addEventListener('click', async () => {
-        const name = window.prompt('Название группы');
-        if (!name || !name.trim()) return;
+        const result = await promptFields(this.app, 'Новая группа', [
+          { key: 'name', label: 'Название группы' },
+        ]);
+        if (!result) return;
+        const name = (result.name || '').trim();
+        if (!name) return;
         try {
-          await this.plugin.syncService.saveGroup({ id: 0, name: name.trim(), members: [] });
+          await this.plugin.syncService.saveGroup({ id: 0, name, members: [] });
           new Notice('Группа создана');
           container.empty();
           container.setText('Загрузка…');
