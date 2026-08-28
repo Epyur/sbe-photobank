@@ -1,0 +1,19 @@
+{
+  "name": "sbe-photobank",
+  "version": "0.1.0",
+  "description": "Внутренний сток-фотобанк: хранение фото/видео в S3, папки и теги, ИИ-описание при загрузке, свободный поиск, права на папки и файлы, комментарии и лайки.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "esbuild": "^0.28.1",
+    "obsidian": "^1.11.4",
+    "typescript": "^5.8.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+data.json
+*.log
+
+# --- бэк (photo-service, ветка backend) ---
+.env
+.env.*
+!.env.example
+*.exe
+*.pem
+*.key
+*.crt
+*.p12
+**/rclone.conf
