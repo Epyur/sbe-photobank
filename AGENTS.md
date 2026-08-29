@@ -63,6 +63,16 @@ LLM-fallback поиска — через sbe-llm (клиент).
 
 ## История работ
 
+### 2026-08-29 — v0.1.13 (vision: https-ссылка вместо base64)
+- Vision-описание переведено с base64 data URL на **временную https-ссылку**: для превью
+  файла берётся presigned-URL (`syncService.getFileLink` → `rclone link --expire 7d`) и
+  передаётся как `image_url.url` (вместо скачивания файла и кодирования в base64).
+  Это соответствует схеме chad v2 (`"url": IMAGE_URL`) и не раздувает тело запроса.
+- `getImageDataUrl`/`arrayBufferToDataUrl` удалены; в `describe` поле `imageDataUrl` →
+  `imageUrl` (http(s)-ссылка).
+- Версия 0.1.12 → **0.1.13** (manifest + package.json), пересборка `main.js`/`styles.css`.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK. Реестр: hashes обновлены, синхронизированы.
+
 ### 2026-08-29 — v0.1.12 (контекст папок при импорте, «Переописать все», правила промптов)
 - **Фикс: контекст папок при первом импорте.** Раньше при импорте папки вольта созданные
   подпапки банка НЕ добавлялись в локальную БД — `folderPath()` возвращал пустую строку,

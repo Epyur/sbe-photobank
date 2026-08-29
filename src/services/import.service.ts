@@ -122,8 +122,8 @@ export class PhotobankImportService {
       const up = await this.sync.uploadFile(content, file.name, folderId, kind, mime);
 
       const schema = this.db.getSchema();
-      const imageDataUrl = aiEnabled && visionEnabled && kind === 'image'
-        ? await this.getImageDataUrl(up.thumb_key || up.file_key)
+      const imageUrl = aiEnabled && visionEnabled && kind === 'image'
+        ? await this.getImageHttpUrl(up.thumb_key || up.file_key)
         : undefined;
       const aiResult = aiEnabled ? await this.ai.describe({
         fileName: file.name,
@@ -131,7 +131,7 @@ export class PhotobankImportService {
         kind,
         context: aiCtx,
         schema,
-        imageDataUrl,
+        imageUrl,
       }) : null;
 
       const custom: Record<string, unknown> = {};
@@ -232,27 +232,17 @@ export class PhotobankImportService {
     return base.replace(/[-_]+/g, ' ').trim() || fileName;
   }
 
-  /** Скачивает превью файла и возвращает data URL (для vision-описания). */
-  private async getImageDataUrl(key: string): Promise<string | undefined> {
+  /** Возвращает временную https-ссылку на файл (presigned через rclone link) для vision-описания. */
+  private async getImageHttpUrl(key: string): Promise<string | undefined> {
     if (!key) return undefined;
     try {
-      const data = await this.sync.downloadFile(key, true);
-      return this.arrayBufferToDataUrl(data, 'image/jpeg');
+      const url = await this.sync.getFileLink(key);
+      if (!url || !/^https?:\/\//.test(url)) return undefined;
+      return url;
     } catch (e: unknown) {
-      console.warn('Фотобанк: не удалось подготовить превью для vision:', errorMessage(e));
+      console.warn('Фотобанк: не удалось получить ссылку на превью для vision:', errorMessage(e));
       return undefined;
     }
-  }
-
-  /** ArrayBuffer → data URL (base64). */
-  private arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    }
-    return `data:${mime};base64,${window.btoa(binary)}`;
   }
 
   /** SHA-256 в hex (для дедупа по содержимому). */

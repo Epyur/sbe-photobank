@@ -51,7 +51,7 @@ export class AiDescribeService {
 
   /** Формирует расширенное описание/теги/категорию/свои поля. Возвращает null, если
    *  ИИ недоступен — вызывающий переходит на ручное заполнение (graceful degradation).
-   *  Если передан imageDataUrl (data URL превью файла), используется vision-запрос —
+   *  Если передан imageUrl (http(s)-ссылка на файл), используется vision-запрос —
    *  ИИ видит изображение и описывает реальные цвета/материалы/композицию. */
   async describe(input: {
     fileName: string;
@@ -59,7 +59,7 @@ export class AiDescribeService {
     kind: string;
     context: AiDescribeContext;
     schema: SchemaField[];
-    imageDataUrl?: string;
+    imageUrl?: string;
   }): Promise<AiDescribeResult | null> {
     let llm;
     try {
@@ -106,7 +106,7 @@ export class AiDescribeService {
       '"tags": ["3-7 коротких тегов, включая признаки кадра/палитры"], "category": "категория (если угадывается)", "location": "локация", "shot_at": 0, ' +
       '"custom": {ключи своих полей из схемы — только если подходят}}';
 
-    const system = input.imageDataUrl ? systemVision : systemText;
+    const system = input.imageUrl ? systemVision : systemText;
 
     const user = `Имя файла: ${input.fileName}
 Путь в банке: ${input.folderPath || 'корень'}
@@ -121,8 +121,8 @@ ${schemaBlock}
 
     try {
       let result: Partial<AiDescribeResult>;
-      if (input.imageDataUrl) {
-        result = await this.completeVisionJson<Partial<AiDescribeResult>>(llm, system, user, input.imageDataUrl);
+      if (input.imageUrl) {
+        result = await this.completeVisionJson<Partial<AiDescribeResult>>(llm, system, user, input.imageUrl);
       } else {
         result = await this.completeJsonWithFallback<Partial<AiDescribeResult>>(llm, system, user);
       }

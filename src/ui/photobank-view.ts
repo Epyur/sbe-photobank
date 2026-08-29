@@ -639,8 +639,8 @@ export class PhotobankView extends ItemView {
   /** Переописывает одну карточку через ИИ (общая логика для одиночного и массового). */
   private async rewriteOne(p: PhotoItem, ctx: AiDescribeContext): Promise<boolean> {
     try {
-      const imageDataUrl = this.plugin.settings.visionEnabled && p.kind === 'image'
-        ? await this.getImageDataUrl(p.thumb_key || p.file_key)
+      const imageUrl = this.plugin.settings.visionEnabled && p.kind === 'image'
+        ? await this.getImageHttpUrl(p.thumb_key || p.file_key)
         : undefined;
       const aiResult = await this.plugin.aiService.describe({
         fileName: p.file_name,
@@ -648,7 +648,7 @@ export class PhotobankView extends ItemView {
         kind: p.kind,
         context: ctx,
         schema: this.plugin.db.getSchema(),
-        imageDataUrl,
+        imageUrl,
       });
       if (!aiResult) return false;
       const custom: Record<string, unknown> = { ...p.custom };
@@ -845,8 +845,8 @@ export class PhotobankView extends ItemView {
       const data = await file.arrayBuffer();
       const up = await this.plugin.syncService.uploadFile(data, file.name, folderId, kind, this.mimeOf(ext));
       const aiEnabled = await this.plugin.aiService.isAvailable();
-      const imageDataUrl = aiEnabled && this.plugin.settings.visionEnabled && kind === 'image'
-        ? await this.getImageDataUrl(up.thumb_key || up.file_key)
+      const imageUrl = aiEnabled && this.plugin.settings.visionEnabled && kind === 'image'
+        ? await this.getImageHttpUrl(up.thumb_key || up.file_key)
         : undefined;
       const aiResult = aiEnabled ? await this.plugin.aiService.describe({
         fileName: file.name,
@@ -854,7 +854,7 @@ export class PhotobankView extends ItemView {
         kind,
         context: ctx,
         schema,
-        imageDataUrl,
+        imageUrl,
       }) : null;
       const now = new Date().toISOString();
       const photo: PhotoItem = {
@@ -893,27 +893,17 @@ export class PhotobankView extends ItemView {
     }
   }
 
-  /** Скачивает превью файла и возвращает data URL (для vision-описания). */
-  private async getImageDataUrl(key: string): Promise<string | undefined> {
+  /** Возвращает временную https-ссылку на файл (presigned через rclone link) для vision-описания. */
+  private async getImageHttpUrl(key: string): Promise<string | undefined> {
     if (!key) return undefined;
     try {
-      const data = await this.plugin.syncService.downloadFile(key, true);
-      return this.arrayBufferToDataUrl(data, 'image/jpeg');
+      const url = await this.plugin.syncService.getFileLink(key);
+      if (!url || !/^https?:\/\//.test(url)) return undefined;
+      return url;
     } catch (e: unknown) {
-      console.warn('Фотобанк: не удалось подготовить превью для vision:', errorMessage(e));
+      console.warn('Фотобанк: не удалось получить ссылку на превью для vision:', errorMessage(e));
       return undefined;
     }
-  }
-
-  /** ArrayBuffer → data URL (base64). */
-  private arrayBufferToDataUrl(buffer: ArrayBuffer, mime: string): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    }
-    return `data:${mime};base64,${window.btoa(binary)}`;
   }
 
   private async importFolderFlow(): Promise<void> {
