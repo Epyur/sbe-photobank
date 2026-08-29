@@ -4,7 +4,7 @@ import { promptFields } from '../ui/prompt-modal';
 import type { PhotobankSyncService } from './sync.service';
 import type { PhotobankDatabase } from '../database/photobank-db';
 import type { AiDescribeService } from './ai-describe.service';
-import type { PhotoItem, AiDescribeContext, SchemaField } from '../types/photobank';
+import type { PhotoItem, AiDescribeContext, SchemaField, PhotoFolder } from '../types/photobank';
 
 export interface ImportResult {
   scanned: number;
@@ -57,11 +57,24 @@ export class PhotobankImportService {
         try {
           const created = await this.sync.createFolder(name, targetFolderId);
           bankFolderBySub.set(child.name, created);
+          // Сразу добавляем папку в локальную БД, чтобы folderPath() работал
+          // при ИИ-описании во время импорта (иначе путь пуст до первого pull).
+          const now = new Date().toISOString();
+          const folderEntry: PhotoFolder = {
+            id: created,
+            name,
+            parent_id: targetFolderId,
+            owner_email: '',
+            created_at: now,
+            updated_at: now,
+          };
+          this.db.addFolder(folderEntry);
         } catch (e: unknown) {
           new Notice(`Фотобанк: не удалось создать папку «${name}»: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
+    await this.db.save();
 
     for (const child of folder.children) {
       if (child instanceof TFile) {

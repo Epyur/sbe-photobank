@@ -227,6 +227,11 @@ export class PhotobankView extends ItemView {
     createFolderBtn.createSpan({ text: '➕' });
     createFolderBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Создать папку' });
     createFolderBtn.addEventListener('click', () => void this.openCreateFolder());
+
+    const redescribeBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
+    redescribeBtn.createSpan({ text: '♻️' });
+    redescribeBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Переописать все' });
+    redescribeBtn.addEventListener('click', () => void this.rewriteAllAiDescriptions());
   }
 
   private renderFolderTree(parent: HTMLElement, tree: Map<number, PhotoFolder[]>, parentId: number, depth: number): void {
@@ -628,8 +633,12 @@ export class PhotobankView extends ItemView {
       return;
     }
     const ctx = await this.collectUploadContext();
+    await this.rewriteOne(p, ctx);
+  }
+
+  /** Переописывает одну карточку через ИИ (общая логика для одиночного и массового). */
+  private async rewriteOne(p: PhotoItem, ctx: AiDescribeContext): Promise<boolean> {
     try {
-      new Notice('Фотобанк: запрашиваю ИИ-описание…');
       const imageDataUrl = this.plugin.settings.visionEnabled && p.kind === 'image'
         ? await this.getImageDataUrl(p.thumb_key || p.file_key)
         : undefined;
@@ -641,10 +650,7 @@ export class PhotobankView extends ItemView {
         schema: this.plugin.db.getSchema(),
         imageDataUrl,
       });
-      if (!aiResult) {
-        new Notice('Фотобанк: ИИ не смог сформировать описание');
-        return;
-      }
+      if (!aiResult) return false;
       const custom: Record<string, unknown> = { ...p.custom };
       for (const [k, v] of Object.entries(aiResult.custom || {})) {
         custom[k] = v;
@@ -660,13 +666,34 @@ export class PhotobankView extends ItemView {
         sync_status: 'local',
       };
       this.plugin.db.updatePhoto(p.id, updates);
-      await this.plugin.db.save();
       await this.pushLocal(p.id);
-      new Notice('Фотобанк: ИИ-описание обновлено');
-      this.render();
+      return true;
     } catch (e: unknown) {
-      new Notice(`Фотобанк: ${errorMessage(e)}`);
+      console.warn(`Фотобанк: не удалось переописать «${p.file_name}»:`, errorMessage(e));
+      return false;
     }
+  }
+
+  /** Массовое переописание всех карточек через ИИ (последовательно, с учётом vision). */
+  private async rewriteAllAiDescriptions(): Promise<void> {
+    if (!(await this.plugin.aiService.isAvailable())) {
+      new Notice('Фотобанк: LLM-центр недоступен (sbe-llm не настроен)');
+      return;
+    }
+    const all = this.plugin.db.getAllPhotos();
+    if (all.length === 0) {
+      new Notice('Фотобанк: нет карточек для переописания');
+      return;
+    }
+    const ctx: AiDescribeContext = { content: '', event: '', location: '', people: '', purpose: '' };
+    new Notice(`Фотобанк: переописываю ${all.length} файлов…`);
+    let ok = 0;
+    for (const p of all) {
+      if (await this.rewriteOne(p, ctx)) ok++;
+    }
+    await this.db().save();
+    new Notice(`Фотобанк: переописано ${ok} из ${all.length}`);
+    this.render();
   }
 
   /** Удаление карточки и файла (admin или автор). */
