@@ -79,13 +79,13 @@ thumb_key, thumb_author, author_email, shot_at, location, visibility_override,
 download_count, likes_count, created_at, updated_at`
 
 // visiblePhotoFilter возвращает SQL-условие видимости фото для пользователя.
-// admin видит всё; остальные — фото в видимых папках ИЛИ grant-override, кроме deny.
+// admin/superadmin видят всё; остальные — фото в видимых папках ИЛИ grant-override, кроме deny.
 func (s *Server) visiblePhotoFilter(ctx context.Context, email string) (string, []any, error) {
 	role, err := s.effectiveRole(ctx, appIDFromEnv(), email)
 	if err != nil {
 		return "", nil, err
 	}
-	if role == "admin" {
+	if role == "admin" || role == "superadmin" {
 		return "", nil, nil
 	}
 	visible, err := s.visibleFolderIDs(ctx, email)
@@ -268,7 +268,7 @@ func (s *Server) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 
 // photoVisible — видимость одного фото для пользователя.
 func (s *Server) photoVisible(ctx context.Context, photoID int64, email, globalRole string) (bool, error) {
-	if globalRole == "admin" {
+	if globalRole == "admin" || globalRole == "superadmin" {
 		return true, nil
 	}
 	var folderID int64
@@ -323,9 +323,15 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
 		return
 	}
-	if role != "admin" && author != email {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: only admin or author"})
-		return
+	// Удалить может admin/superadmin системы, администратор папки или автор.
+	if role != "admin" && role != "superadmin" && author != email {
+		fid, err := s.photoFolderID(r.Context(), id)
+		if err == nil && s.canManageFolder(r.Context(), fid, email, role) {
+			// разрешено — админ папки
+		} else {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: only admin or author"})
+			return
+		}
 	}
 	if _, err := s.pool.Exec(r.Context(), `DELETE FROM photos WHERE id = $1`, id); err != nil {
 		log.Printf("delete photo: %v", err)

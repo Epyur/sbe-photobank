@@ -31,34 +31,42 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if cond != "" {
 		where += cond
 	}
+
+	// Строим условия поиска по словам запроса.
+	// - AND (все слова обязательны) — точные результаты;
+	// - OR (хотя бы одно слово) — fallback, если по AND мало (напр. «красный» только в папке).
+	// Сортировка по ts_rank — чем больше/точнее совпало, тем выше.
+	var andClause, orClause string
 	if q != "" {
-		idx := paramIdx + 1
-		if where != "" {
-			where += " AND "
-		}
-		// Многословный запрос: ищем по КАЖДОМУ слову отдельно и объединяем OR
-		// (plainto_tsquery по всей фразе строит AND — «Красный фальц» требовал оба
-		// слова в одной записи и не находил ничего, если «красный» есть только в
-		// названии папки). Ранжируем ts_rank — чем больше слов совпало, тем выше.
 		words := strings.Fields(q)
 		if len(words) == 1 {
-			where += `(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
+			idx := paramIdx + 1
+			andClause = `(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
 				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
 				' ' || coalesce(fp.path,'')) @@ plainto_tsquery('russian', $` + itoa(idx) + `))`
 			args = append(args, q)
+			paramIdx++
 		} else {
-			tsqueryParts := make([]string, 0, len(words))
+			andParts := make([]string, 0, len(words))
+			orParts := make([]string, 0, len(words))
+			wordHits := make([]string, 0, len(words))
+			idxStart := paramIdx + 1
+			// Полное tsvector-выражение (переиспользуется в @@ и в wordHits).
+			tsvExpr := `to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
+				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
+				' ' || coalesce(fp.path,''))`
 			for i, w := range words {
-				pi := idx + i
-				tsqueryParts = append(tsqueryParts, `plainto_tsquery('russian', $`+itoa(pi)+`)`)
+				pi := idxStart + i
+				andParts = append(andParts, `plainto_tsquery('russian', $`+itoa(pi)+`)`)
+				orParts = append(orParts, `plainto_tsquery('russian', $`+itoa(pi)+`)`)
+				wordHits = append(wordHits, `((`+tsvExpr+`) @@ plainto_tsquery('russian', $`+itoa(pi)+`))::int`)
 				args = append(args, w)
 			}
-			where += `(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
-				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
-				' ' || coalesce(fp.path,'')) @@ (` + strings.Join(tsqueryParts, " || ") + `))`
+			andClause = `(` + tsvExpr + ` @@ (` + strings.Join(andParts, " && ") + `))`
+			orClause = `((` + tsvExpr + `) @@ (` + strings.Join(orParts, " || ") + `)) AND (` +
+				strings.Join(wordHits, " + ") + ` >= 2)`
 			paramIdx += len(words)
 		}
-		paramIdx++
 	}
 	if folderID > 0 {
 		idx := paramIdx + 1
@@ -79,7 +87,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		paramIdx++
 	}
 
-	query := `
+	runQuery := func(searchClause string) ([]*Photo, error) {
+		innerWhere := where
+		if searchClause != "" {
+			if innerWhere != "" {
+				innerWhere += " AND "
+			}
+			innerWhere += searchClause
+		}
+		query := `
 WITH RECURSIVE fp AS (
 	SELECT id, name, name::text AS path FROM folders WHERE parent_id = 0
 	UNION ALL
@@ -91,32 +107,65 @@ SELECT p.id, p.folder_id, p.title, p.description, p.tags, p.custom,
 	p.thumb_key, p.thumb_author, p.author_email, p.shot_at, p.location, p.visibility_override,
 	p.download_count, p.likes_count, p.created_at, p.updated_at
 FROM photos p LEFT JOIN fp ON fp.id = p.folder_id`
-	if where != "" {
-		query += " WHERE " + where
-	}
-	query += " ORDER BY p.updated_at DESC LIMIT 500"
+		if innerWhere != "" {
+			query += " WHERE " + innerWhere
+		}
+		if q != "" {
+			query += ` ORDER BY ts_rank(to_tsvector('russian', coalesce(p.title,'') || ' ' || coalesce(p.description,'') || ' ' ||
+				coalesce(p.tags::text,'') || ' ' || coalesce(p.custom::text,'') || ' ' || coalesce(p.location,'') ||
+				' ' || coalesce(fp.path,'')), plainto_tsquery('russian', '` + strings.Join(strings.Fields(q), " ") + `')) DESC`
+		} else {
+			query += " ORDER BY p.updated_at DESC"
+		}
+		query += " LIMIT 500"
 
-	rows, err := s.pool.Query(r.Context(), query, args...)
-	if err != nil {
-		log.Printf("search: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
-		return
+		rows, err := s.pool.Query(r.Context(), query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		photos := make([]*Photo, 0, 64)
+		for rows.Next() {
+			p, err := scanPhoto(rows)
+			if err != nil {
+				log.Printf("search scan: %v", err)
+				continue
+			}
+			photos = append(photos, p)
+		}
+		return photos, rows.Err()
 	}
-	defer rows.Close()
 
 	photos := make([]*Photo, 0, 64)
-	for rows.Next() {
-		p, err := scanPhoto(rows)
+	if andClause != "" {
+		p, err := runQuery(andClause)
 		if err != nil {
-			log.Printf("search scan: %v", err)
-			continue
+			log.Printf("search (and): %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+			return
 		}
-		photos = append(photos, p)
+		photos = p
 	}
-	if err := rows.Err(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
-		return
+	// Многословный запрос: если по AND мало (напр. слова только в папках) — OR-fallback.
+	if orClause != "" && len(photos) < 5 {
+		extra, err := runQuery(orClause)
+		if err != nil {
+			log.Printf("search (or): %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+			return
+		}
+		seen := make(map[int64]bool, len(photos))
+		for _, p := range photos {
+			seen[p.ID] = true
+		}
+		for _, p := range extra {
+			if !seen[p.ID] {
+				seen[p.ID] = true
+				photos = append(photos, p)
+			}
+		}
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"photos": photos})
 }
 

@@ -17,24 +17,30 @@ type Folder struct {
 	Name        string `json:"name"`
 	ParentID    int64  `json:"parent_id"`
 	OwnerEmail  string `json:"owner_email"`
+	Limited     bool   `json:"limited"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 	Permissions []FolderPerm `json:"permissions,omitempty"`
 }
 
-// FolderPerm — доступ к папке: subject (email или имя группы), role (viewer/commenter/editor).
+// FolderPerm — доступ к папке: subject (email или имя группы),
+// role (viewer «Сотрудник» / editor «Редактор» / admin «Администратор папки»).
 type FolderPerm struct {
 	Subject string `json:"subject"`
 	Role    string `json:"role"`
 }
 
 // visibleFolderIDs возвращает множество видимых папок пользователя (folderID -> max роль).
-// Видимость: папка, на которую (или на любого предка) назначен доступ пользователю/группе,
-// + все потомки видимых папок (наследование вниз).
+// Модель прав (как lab-service):
+//   - общий доступ: по умолчанию все папки видны «сотрудникам» (viewer), кроме
+//     папок с limited=true;
+//   - limited-папка видна только тем, кому (или чьей группе) назначена роль на
+//     неё или на любого предка;
+//   - роли наследуются вниз по дереву.
 func (s *Server) visibleFolderIDs(ctx context.Context, email string) (map[int64]int, error) {
 	subjects := s.userSubjects(ctx, email)
 
-	// Все записи folder_permissions для субъектов пользователя: folder_id -> роль.
+	// Роли пользователя/групп на папки: folder_id -> max роль.
 	rows, err := s.pool.Query(ctx, `
 SELECT fp.folder_id, fp.role FROM folder_permissions fp
 WHERE fp.subject = ANY($1)`, subjects)
@@ -58,43 +64,64 @@ WHERE fp.subject = ANY($1)`, subjects)
 		return nil, err
 	}
 
-	if len(direct) == 0 {
-		return map[int64]int{}, nil
-	}
-
-	// Дерево папок.
-	treeRows, err := s.pool.Query(ctx, `SELECT id, parent_id FROM folders`)
+	// Дерево папок + флаг limited.
+	treeRows, err := s.pool.Query(ctx, `SELECT id, parent_id, limited FROM folders`)
 	if err != nil {
 		return nil, err
 	}
 	children := map[int64][]int64{}
+	limited := map[int64]bool{}
+	topLevel := map[int64]bool{}
 	for treeRows.Next() {
 		var id, parent int64
-		if err := treeRows.Scan(&id, &parent); err != nil {
+		var lim bool
+		if err := treeRows.Scan(&id, &parent, &lim); err != nil {
 			treeRows.Close()
 			return nil, err
 		}
 		children[parent] = append(children[parent], id)
+		limited[id] = lim
+		if parent == 0 {
+			topLevel[id] = true
+		}
 	}
 	treeRows.Close()
 	if err := treeRows.Err(); err != nil {
 		return nil, err
 	}
 
-	// BFS вниз: потомки видимых папок наследуют видимость и роль.
+	// Корни видимости: верхние неограниченные папки (общий доступ viewer)
+	// + любые папки (в т.ч. limited) с прямой ролью пользователя/группы.
 	visible := map[int64]int{}
-	queue := make([]int64, 0, len(direct))
+	queue := make([]int64, 0, len(direct)+8)
+	for id := range topLevel {
+		if !limited[id] {
+			visible[id] = roleRank("viewer")
+			queue = append(queue, id)
+		}
+	}
 	for fid, role := range direct {
 		if role > visible[fid] {
 			visible[fid] = role
+			queue = append(queue, fid)
 		}
-		queue = append(queue, fid)
 	}
+
+	// BFS вниз: потомки наследуют видимость/роль; limited-подпапка наследуется
+	// только если у пользователя есть роль на неё (иначе — стоп по ветке).
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
 		role := visible[parent]
 		for _, child := range children[parent] {
+			if limited[child] {
+				// Ограниченная подпапка: видна только по своей роли.
+				if dr := direct[child]; dr > 0 && dr > visible[child] {
+					visible[child] = dr
+					queue = append(queue, child)
+				}
+				continue
+			}
 			if role > visible[child] {
 				visible[child] = role
 				queue = append(queue, child)
@@ -133,7 +160,7 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.pool.Query(r.Context(), `
-SELECT id, name, parent_id, owner_email, created_at, updated_at FROM folders ORDER BY name`)
+SELECT id, name, parent_id, owner_email, limited, created_at, updated_at FROM folders ORDER BY name`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
 		return
@@ -141,7 +168,7 @@ SELECT id, name, parent_id, owner_email, created_at, updated_at FROM folders ORD
 	defer rows.Close()
 
 	visible := map[int64]int{}
-	if role != "admin" {
+	if role != "admin" && role != "superadmin" {
 		visible, err = s.visibleFolderIDs(r.Context(), email)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
@@ -153,13 +180,13 @@ SELECT id, name, parent_id, owner_email, created_at, updated_at FROM folders ORD
 	for rows.Next() {
 		var f Folder
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&f.ID, &f.Name, &f.ParentID, &f.OwnerEmail, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.ParentID, &f.OwnerEmail, &f.Limited, &createdAt, &updatedAt); err != nil {
 			log.Printf("folders scan: %v", err)
 			continue
 		}
 		f.CreatedAt = createdAt.Format(time.RFC3339)
 		f.UpdatedAt = updatedAt.Format(time.RFC3339)
-		if role == "admin" || visible[f.ID] > 0 {
+		if role == "admin" || role == "superadmin" || visible[f.ID] > 0 {
 			folders = append(folders, f)
 		}
 	}
@@ -170,7 +197,10 @@ SELECT id, name, parent_id, owner_email, created_at, updated_at FROM folders ORD
 	writeJSON(w, http.StatusOK, map[string]any{"folders": folders})
 }
 
-// handleCreateFolder создаёт папку ({name, parent_id}) (admin).
+// handleCreateFolder создаёт папку ({name, parent_id}).
+// Администратор системы (admin/superadmin) создаёт верхние папки (parent_id=0)
+// и папки где угодно; администратор папки (role=admin на родительской папке)
+// создаёт подпапки внутри своей папки.
 func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name     string `json:"name"`
@@ -186,9 +216,23 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	// Право: глобальный admin/superadmin, либо admin на родительской папке.
+	can := roleRank(globalRole) >= roleRank("admin")
+	if !can && req.ParentID > 0 {
+		can = s.canManageFolder(r.Context(), req.ParentID, email, globalRole)
+	}
+	if !can {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
+		return
+	}
 
 	var id int64
-	err := s.pool.QueryRow(r.Context(), `
+	err = s.pool.QueryRow(r.Context(), `
 INSERT INTO folders (name, parent_id, owner_email) VALUES ($1, $2, $3) RETURNING id`,
 		req.Name, req.ParentID, email).Scan(&id)
 	if err != nil {
@@ -199,7 +243,20 @@ INSERT INTO folders (name, parent_id, owner_email) VALUES ($1, $2, $3) RETURNING
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
-// handleRenameFolder переименовывает папку ({id, name}) (admin).
+// canManageFolder — может ли пользователь администрировать папку
+// (глобальный admin/superadmin или роль admin на папке/предке).
+func (s *Server) canManageFolder(ctx context.Context, folderID int64, email, globalRole string) bool {
+	if roleRank(globalRole) >= roleRank("admin") {
+		return true
+	}
+	visible, err := s.visibleFolderIDs(ctx, email)
+	if err != nil {
+		return false
+	}
+	return roleRank(roleName(visible[folderID])) >= roleRank("admin")
+}
+
+// handleRenameFolder переименовывает папку ({id, name}) (admin системы или папки).
 func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID   int64  `json:"id"`
@@ -214,6 +271,16 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "id and name are required"})
 		return
 	}
+	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	if !s.canManageFolder(r.Context(), req.ID, email, globalRole) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
+		return
+	}
 	if _, err := s.pool.Exec(r.Context(),
 		`UPDATE folders SET name = $2 WHERE id = $1`, req.ID, req.Name); err != nil {
 		log.Printf("rename folder: %v", err)
@@ -223,11 +290,21 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// handleDeleteFolder удаляет папку вместе с её подпапками и фото (admin).
+// handleDeleteFolder удаляет папку вместе с её подпапками и фото (admin системы или папки).
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	id := parseIntPath(r, "id")
 	if id <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid id"})
+		return
+	}
+	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	if !s.canManageFolder(r.Context(), id, email, globalRole) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
 		return
 	}
 
@@ -330,8 +407,8 @@ func (s *Server) handleSetFolderPerm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "subject is required"})
 		return
 	}
-	if req.Role != "" && req.Role != "viewer" && req.Role != "commenter" && req.Role != "editor" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role must be viewer, commenter or editor"})
+	if req.Role != "" && req.Role != "viewer" && req.Role != "commenter" && req.Role != "editor" && req.Role != "admin" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role must be viewer, commenter, editor or admin"})
 		return
 	}
 
@@ -346,6 +423,41 @@ ON CONFLICT (folder_id, subject) DO UPDATE SET role = EXCLUDED.role`, id, req.Su
 	}
 	if err != nil {
 		log.Printf("set folder perm: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSetFolderLimited включает/выключает «ограниченный доступ» к папке
+// (админ системы или админ папки): при limited=true папка скрыта от общего
+// просмотра — видна только по назначенным ролям.
+func (s *Server) handleSetFolderLimited(w http.ResponseWriter, r *http.Request) {
+	id := parseIntPath(r, "id")
+	if id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid id"})
+		return
+	}
+	var req struct {
+		Limited bool `json:"limited"`
+	}
+	if err := decodeJSON(w, r, &req, 1<<20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	if !s.canManageFolder(r.Context(), id, email, globalRole) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
+		return
+	}
+	if _, err := s.pool.Exec(r.Context(),
+		`UPDATE folders SET limited = $2 WHERE id = $1`, id, req.Limited); err != nil {
+		log.Printf("set folder limited: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
 		return
 	}

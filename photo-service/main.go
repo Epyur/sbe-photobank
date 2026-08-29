@@ -76,12 +76,15 @@ func main() {
 	mux.HandleFunc("GET /api/photo/folders", s.requirePerm("viewer")(s.handleListFolders))
 	mux.HandleFunc("POST /api/photo/folders", s.requirePerm("admin")(s.handleCreateFolder))
 	mux.HandleFunc("POST /api/photo/folders/rename", s.requirePerm("admin")(s.handleRenameFolder))
-	mux.HandleFunc("DELETE /api/photo/folders/{id}", s.requirePerm("admin")(s.handleDeleteFolder))
-	mux.HandleFunc("GET /api/photo/folders/{id}/permissions", s.requirePerm("admin")(s.handleListFolderPerms))
-	mux.HandleFunc("POST /api/photo/folders/{id}/permissions", s.requirePerm("admin")(s.handleSetFolderPerm))
+	mux.HandleFunc("DELETE /api/photo/folders/{id}", s.requirePerm("viewer")(s.handleDeleteFolder))
+	mux.HandleFunc("POST /api/photo/folders/{id}/limited", s.requirePerm("viewer")(s.handleSetFolderLimited))
+	mux.HandleFunc("GET /api/photo/folders/{id}/permissions", s.requirePerm("viewer")(s.handleListFolderPerms))
+	mux.HandleFunc("POST /api/photo/folders/{id}/permissions", s.requirePerm("viewer")(s.handleSetFolderPerm))
 	mux.HandleFunc("GET /api/photo/permissions", s.requirePerm("admin")(s.handleListPermissions))
 	mux.HandleFunc("POST /api/photo/permissions", s.requirePerm("admin")(s.handleSetPermission))
 	mux.HandleFunc("GET /api/photo/permissions/me", s.requirePerm("viewer")(s.handleMyPermission))
+	mux.HandleFunc("GET /api/photo/common-access", s.requirePerm("admin")(s.handleGetCommonAccess))
+	mux.HandleFunc("POST /api/photo/common-access", s.requirePerm("admin")(s.handleSetCommonAccess))
 	mux.HandleFunc("GET /api/photo/groups", s.requirePerm("viewer")(s.handleListGroups))
 	mux.HandleFunc("POST /api/photo/groups", s.requirePerm("admin")(s.handleSaveGroup))
 	mux.HandleFunc("DELETE /api/photo/groups/{id}", s.requirePerm("admin")(s.handleDeleteGroup))
@@ -131,10 +134,16 @@ func (s *Server) migrate(ctx context.Context) error {
 			name         TEXT NOT NULL,
 			parent_id    BIGINT NOT NULL DEFAULT 0,
 			owner_email  TEXT NOT NULL DEFAULT '',
+			limited      BOOLEAN NOT NULL DEFAULT false,
 			created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 			updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id)`,
+		`ALTER TABLE folders ADD COLUMN IF NOT EXISTS limited BOOLEAN NOT NULL DEFAULT false`,
+		`CREATE TABLE IF NOT EXISTS photo_common_access (
+			app    TEXT PRIMARY KEY,
+			level  TEXT NOT NULL DEFAULT 'viewer'
+		)`,
 		`CREATE TABLE IF NOT EXISTS folder_permissions (
 			folder_id BIGINT NOT NULL,
 			subject   TEXT NOT NULL,

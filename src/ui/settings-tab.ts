@@ -63,6 +63,17 @@ export class PhotobankSettingsTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
+      .setName('Базовый промпт (пользовательский)')
+      .setDesc('Заменяет стандартный системный промпт ИИ-описания. Пусто — стандартный промпт плагина (описывать кадр, не фантазировать, title без технического имени файла). Требование вернуть JSON по схеме добавляется автоматически.')
+      .addTextArea(text => text
+        .setPlaceholder('Например: «Опиши строительный объект: стадию работ, материалы, технику. Только факты с фото.»')
+        .setValue(this.plugin.settings.basePrompt)
+        .onChange(async (value) => {
+          this.plugin.settings.basePrompt = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
       .setHeading()
       .setName('Права доступа');
 
@@ -88,17 +99,36 @@ export class PhotobankSettingsTab extends PluginSettingTab {
   }
 
   private async renderPermissions(container: HTMLElement): Promise<void> {
+    const canAdmin = this.plugin.myRole === 'admin' || this.plugin.myRole === 'superadmin';
     try {
       const me = await this.plugin.syncService.getMyPermission();
       if (!me.hasAccess) {
         container.setText('Нет доступа к серверу. Запросите ключ в ЦУП и получите доступ у администратора.');
         return;
       }
-      if (me.role !== 'admin') {
-        container.setText(`Ваша роль: ${ROLE_LABELS[me.role] || me.role}. Только администратор может управлять правами.`);
+      if (!canAdmin) {
+        container.setText(`Ваша роль: ${ROLE_LABELS[me.role] || me.role}. Только администратор системы может управлять правами.`);
         return;
       }
       container.empty();
+
+      // Общий доступ (по умолчанию «сотрудник» — все видят папки).
+      const commonDiv = container.createDiv({ cls: 'tn-doc-mb8' });
+      commonDiv.createDiv({ cls: 'tn-doc-meta', text: 'Общий доступ (для всех, кому не назначена роль):' });
+      const commonSelect = commonDiv.createEl('select', { cls: 'tn-doc-select' });
+      commonSelect.createEl('option', { value: 'viewer', text: 'Сотрудник (просмотр)' });
+      commonSelect.createEl('option', { value: '', text: 'Нет общего доступа' });
+      commonSelect.value = await this.plugin.syncService.getCommonAccess();
+      commonSelect.addEventListener('change', async () => {
+        try {
+          await this.plugin.syncService.setCommonAccess(commonSelect.value);
+          new Notice('Общий доступ обновлён');
+        } catch (e: unknown) {
+          new Notice(`Ошибка: ${errorMessage(e)}`);
+        }
+      });
+      commonDiv.appendChild(commonSelect);
+
       const perms = await this.plugin.syncService.listPermissions();
       const table = container.createEl('table', { cls: 'tn-table' });
       const thead = table.createEl('thead');
@@ -116,10 +146,13 @@ export class PhotobankSettingsTab extends PluginSettingTab {
           roleCell.setText(`${ROLE_LABELS[p.role] || p.role} (это вы)`);
         } else {
           const roleSelect = roleCell.createEl('select', { cls: 'tn-doc-select' });
-          roleSelect.createEl('option', { value: 'viewer', text: 'Просмотр' });
+          roleSelect.createEl('option', { value: 'viewer', text: 'Сотрудник (просмотр)' });
           roleSelect.createEl('option', { value: 'commenter', text: 'Просмотр + комментарии' });
           roleSelect.createEl('option', { value: 'editor', text: 'Редактор' });
           roleSelect.createEl('option', { value: 'admin', text: 'Администратор' });
+          if (this.plugin.myRole === 'superadmin') {
+            roleSelect.createEl('option', { value: 'superadmin', text: 'Администратор системы' });
+          }
           roleSelect.value = p.role;
           roleSelect.addEventListener('change', async () => {
             try {
@@ -151,10 +184,13 @@ export class PhotobankSettingsTab extends PluginSettingTab {
       const emailInput = emailCell.createEl('input', { attr: { type: 'text', placeholder: 'email@tn.ru' }, cls: 'tn-doc-input' });
       const roleCell = addRow.createEl('td');
       const roleSelect = roleCell.createEl('select', { cls: 'tn-doc-select' });
-      roleSelect.createEl('option', { value: 'viewer', text: 'Просмотр' });
+      roleSelect.createEl('option', { value: 'viewer', text: 'Сотрудник (просмотр)' });
       roleSelect.createEl('option', { value: 'commenter', text: 'Просмотр + комментарии' });
       roleSelect.createEl('option', { value: 'editor', text: 'Редактор' });
       roleSelect.createEl('option', { value: 'admin', text: 'Администратор' });
+      if (this.plugin.myRole === 'superadmin') {
+        roleSelect.createEl('option', { value: 'superadmin', text: 'Администратор системы' });
+      }
       const actionCell = addRow.createEl('td');
       const addBtn = actionCell.createEl('button', { text: '➕ Добавить', cls: 'tn-btn tn-btn-primary' });
       addBtn.addEventListener('click', async () => {

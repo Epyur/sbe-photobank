@@ -3,6 +3,7 @@ import type SbePhotobankPlugin from '../main';
 import type { PhotoItem, PhotoFolder, PhotoGroup, SchemaField, AiDescribeContext } from '../types/photobank';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
 import { promptFields } from './prompt-modal';
+import { PhotobankHelpModal } from './help-modal';
 import { nextLocalId } from '../services/import.service';
 
 export const SBE_PHOTOBANK_VIEW_TYPE = 'sbe-photobank-view';
@@ -67,7 +68,8 @@ export class PhotobankView extends ItemView {
     this.container.addClass('tn-photo-view');
 
     try {
-      await this.plugin.syncService.getMyPermission();
+      const me = await this.plugin.syncService.getMyPermission();
+      this.plugin.myRole = me.hasAccess ? me.role : '';
     } catch (e: unknown) {
       new Notice(`Фотобанк: ${errorMessage(e)}`);
     }
@@ -247,6 +249,17 @@ export class PhotobankView extends ItemView {
     createFolderBtn.createSpan({ text: '➕' });
     createFolderBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Создать папку' });
     createFolderBtn.addEventListener('click', () => void this.openCreateFolder());
+
+    const helpBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
+    helpBtn.createSpan({ text: '❓' });
+    helpBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Справка' });
+    helpBtn.addEventListener('click', () => void this.openHelp());
+  }
+
+  /** Открывает модальное окно «Справка» с инструкцией по работе с фотобанком. */
+  private openHelp(): void {
+    const modal = new PhotobankHelpModal(this.app);
+    modal.open();
   }
 
   private renderFolderTree(parent: HTMLElement, tree: Map<number, PhotoFolder[]>, parentId: number, depth: number): void {
@@ -832,7 +845,8 @@ export class PhotobankView extends ItemView {
 
   private async uploadFiles(): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
-    if (!me.hasAccess || (me.role !== 'editor' && me.role !== 'admin')) {
+    const canUpload = me.hasAccess && ['editor', 'admin', 'superadmin'].includes(me.role);
+    if (!canUpload) {
       new Notice('Фотобанк: загрузка доступна редакторам и администраторам');
       return;
     }
@@ -961,7 +975,7 @@ export class PhotobankView extends ItemView {
 
   private async importFolderFlow(): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
-    if (!me.hasAccess || (me.role !== 'editor' && me.role !== 'admin')) {
+    if (!me.hasAccess || !['editor', 'admin', 'superadmin'].includes(me.role)) {
       new Notice('Фотобанк: импорт доступен редакторам и администраторам');
       return;
     }
@@ -1006,8 +1020,8 @@ export class PhotobankView extends ItemView {
 
   private async openCreateFolder(): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
-    if (me.role !== 'admin') {
-      new Notice('Фотобанк: создание папок доступно администратору');
+    if (!['admin', 'superadmin'].includes(me.role)) {
+      new Notice('Фотобанк: создание папок доступно администратору системы');
       return;
     }
     const modalHtml = document.createElement('div');
@@ -1036,11 +1050,14 @@ export class PhotobankView extends ItemView {
     modal.open();
   }
 
-  /** «Свойства папки»: переименование, права доступа, удаление (admin). */
+  /** «Свойства папки»: переименование, ограниченный доступ, права, удаление (admin системы или папки). */
   private async openFolderSettings(folder: PhotoFolder): Promise<void> {
     const me = await this.plugin.syncService.getMyPermission();
-    if (me.role !== 'admin') {
+    const globalAdmin = ['admin', 'superadmin'].includes(me.role);
+    if (!globalAdmin) {
+      // Возможно, админ этой папки — сервер проверит; показываем модал (сервер 403 на действия).
       new Notice('Фотобанк: свойства папок доступны администратору');
+      return;
       return;
     }
     const modal = new FolderSettingsModal(this.app, this.plugin, folder, () => {
@@ -1162,6 +1179,23 @@ class FolderSettingsModal extends Modal {
       }
     });
 
+    // Ограниченный доступ: папка скрыта от общего просмотра, видна только по ролям.
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Ограниченный доступ' });
+    const limRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
+    const limLabel = limRow.createSpan({ cls: 'tn-photo-field-label', text: 'Видна только по ролям (не всем сотрудникам):' });
+    const limCb = limRow.createEl('input', { attr: { type: 'checkbox' }, cls: 'tn-doc-cb' });
+    limCb.checked = !!this.folder.limited;
+    limCb.addEventListener('change', async () => {
+      try {
+        await this.plugin.syncService.setFolderLimited(this.folder.id, limCb.checked);
+        this.folder.limited = limCb.checked;
+        new Notice('Ограниченный доступ обновлён');
+        this.onChanged();
+      } catch (e: unknown) {
+        new Notice(`Фотобанк: ${errorMessage(e)}`);
+      }
+    });
+
     // Права доступа.
     box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Права доступа' });
     const permsBox = box.createDiv({ cls: 'tn-photo-mb8' });
@@ -1214,9 +1248,9 @@ class FolderSettingsModal extends Modal {
       const addRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
       const subjectInput = addRow.createEl('input', { attr: { type: 'text', placeholder: 'email или группа' }, cls: 'tn-doc-input' });
       const roleSelect = addRow.createEl('select', { cls: 'tn-doc-select' });
-      roleSelect.createEl('option', { value: 'viewer', text: 'Просмотр' });
-      roleSelect.createEl('option', { value: 'commenter', text: 'Просмотр + комментарии' });
+      roleSelect.createEl('option', { value: 'viewer', text: 'Сотрудник (просмотр)' });
       roleSelect.createEl('option', { value: 'editor', text: 'Редактор' });
+      roleSelect.createEl('option', { value: 'admin', text: 'Администратор папки' });
       const add = addRow.createEl('button', { text: '➕', cls: 'tn-btn tn-btn-ghost' });
       add.addEventListener('click', async () => {
         const subject = subjectInput.value.trim();

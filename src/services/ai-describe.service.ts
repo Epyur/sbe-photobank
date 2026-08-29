@@ -6,14 +6,21 @@ import type { AiDescribeContext, AiDescribeResult, SchemaField } from '../types/
  *  строится из контекста пользователя + имени файла + авто-метаданных. */
 export class AiDescribeService {
   private getModel: () => string;
+  private getBasePrompt: () => string;
 
-  constructor(getModel: () => string) {
+  constructor(getModel: () => string, getBasePrompt: () => string) {
     this.getModel = getModel;
+    this.getBasePrompt = getBasePrompt;
   }
 
   private model(): string | undefined {
     const m = this.getModel().trim();
     return m ? m : undefined;
+  }
+
+  /** Пользовательский базовый промпт (заменяет системный, если задан). */
+  private basePrompt(): string {
+    return this.getBasePrompt().trim();
   }
 
   /** Готов ли LLM-центр. */
@@ -106,7 +113,23 @@ export class AiDescribeService {
       '"tags": ["3-7 коротких тегов, включая признаки кадра/палитры"], "category": "категория (если угадывается)", "location": "локация", "shot_at": 0, ' +
       '"custom": {ключи своих полей из схемы — только если подходят}}';
 
-    const system = input.imageUrl ? systemVision : systemText;
+    // Пользовательский базовый промпт (настройки плагина) — заменяет стандартный системный.
+    // К нему всегда добавляется требование вернуть JSON по схеме (иначе парсинг сломается).
+    const customPrompt = this.basePrompt();
+    const jsonSchema = 'Верни ТОЛЬКО JSON без пояснений: ' +
+      '{"title": "ОТОБРАЖАЕМОЕ В СТОКЕ ИМЯ файла — короткое, ёмкое, продающее (≤60 симв.), по которому файл показывается в сетке и поиске", ' +
+      '"description": "описание", ' +
+      '"tags": ["теги"], "category": "категория (если угадывается)", "location": "локация", "shot_at": 0, ' +
+      '"custom": {ключи своих полей из схемы — только если подходят}}';
+
+    let system: string;
+    if (customPrompt) {
+      system = customPrompt + '\n' + jsonSchema;
+    } else if (input.imageUrl) {
+      system = systemVision;
+    } else {
+      system = systemText;
+    }
 
     const user = `Имя файла: ${input.fileName}
 Путь в банке: ${input.folderPath || 'корень'}

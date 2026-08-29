@@ -80,6 +80,8 @@ func appIDFromEnv() string {
 
 func roleRank(role string) int {
 	switch role {
+	case "superadmin":
+		return 5
 	case "admin":
 		return 4
 	case "editor":
@@ -109,14 +111,27 @@ func (s *Server) roleFor(ctx context.Context, appID, email string) (string, erro
 	return role, nil
 }
 
-// effectiveRole — персональная роль пользователя (общего доступа в фотобанке нет:
-// по умолчанию всё закрыто, спека §5).
+// effectiveRole — персональная роль, иначе общий уровень доступа
+// (по умолчанию viewer — «сотрудник»: все авторизованные могут просматривать).
 func (s *Server) effectiveRole(ctx context.Context, appID, email string) (string, error) {
 	role, err := s.roleFor(ctx, appID, email)
 	if err != nil {
 		return "", err
 	}
-	return role, nil
+	if role != "" {
+		return role, nil
+	}
+	var level string
+	err = s.pool.QueryRow(ctx,
+		`SELECT level FROM photo_common_access WHERE app = $1`, appID).Scan(&level)
+	if err != nil {
+		// Нет записи — дефолт «сотрудник» (viewer).
+		return "viewer", nil
+	}
+	if level == "" {
+		return "viewer", nil
+	}
+	return level, nil
 }
 
 func (s *Server) requirePerm(minRole string) func(http.HandlerFunc) http.HandlerFunc {

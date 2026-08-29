@@ -4,7 +4,7 @@
 
 - `manifest.id`: `sbe-photobank`
 - Имя: LogicTEAM.Фотобанк
-- Версия: 0.1.15
+- Версия: 0.1.16
 - Автор: Полищук Евгений (polishchuk@tn.ru)
 - Зависимость от `sbe-core` (при сборке), `sbe-llm` (ИИ-описание/поиск), `sbe-apstore`
   (JWT, новости)
@@ -53,7 +53,8 @@
 }
 ```
 
-- `PhotoFolder`: `{id, name, parent_id, owner_email, created_at, updated_at}`.
+- `PhotoFolder`: `{id, name, parent_id, owner_email, limited, created_at, updated_at}` —
+  `limited` = «ограниченный доступ» (папка скрыта от общего просмотра).
 - `PhotoGroup`: `{id, name, members[]}` — субъект доступа (email или имя группы).
 - `SchemaField`: `{key, type(text|list|date|number|bool), label, required, options?}`.
 
@@ -69,7 +70,8 @@
 
 ### GET /api/photo/sync/pull — выгрузка видимых карточек (viewer+)
 - Ответ: `{"photos": [PhotoItem, ...]}`. Видимость: папка видна пользователю (или его группе)
-  напрямую или через предка; grant-override добавляет файл; deny скрывает от всех, кроме admin.
+  напрямую или через предка; **limited-папка скрыта от общего просмотра** (видна только по
+  назначенным ролям); grant-override добавляет файл; deny скрывает от всех, кроме admin.
 
 ### POST /api/photo/file — загрузка оригинала в S3 (editor+)
 - `multipart/form-data`: `file` + `folder_id` + `kind` + `mime_type`.
@@ -95,12 +97,21 @@
   LLM-fallback — на клиенте (sbe-llm).
 
 ### Папки и права
-- `GET /api/photo/folders` (viewer+), `POST /api/photo/folders` (admin), `POST /api/photo/folders/rename` (admin),
-  `DELETE /api/photo/folders/{id}` (admin, каскадно), `GET/POST /api/photo/folders/{id}/permissions` (admin).
+- `GET /api/photo/folders` (viewer+), `POST /api/photo/folders` (admin системы;
+  админ папки — подпапки в своей папке), `POST /api/photo/folders/rename`,
+  `DELETE /api/photo/folders/{id}` (admin системы или папки, каскадно),
+  `GET/POST /api/photo/folders/{id}/permissions` (admin системы или папки),
+  `POST /api/photo/folders/{id}/limited` (admin системы или папки, `{limited: bool}`).
 
-### Глобальные роли
+### Глобальные роли и общий доступ
 - `GET /api/photo/permissions/me` (viewer+), `GET/POST /api/photo/permissions` (admin).
-  Роли: viewer < commenter < editor < admin. Общего доступа нет.
+- Роли: `viewer` (Сотрудник) < `commenter` < `editor` (Редактор) < `admin` (Администратор) <
+  `superadmin` (Администратор системы; назначает только действующий superadmin, владелец).
+- **Общий доступ** (`photo_common_access`, по умолчанию `viewer` — все сотрудники видят
+  папки): `GET/POST /api/photo/common-access` (admin). `""` — закрыть общий доступ.
+- **Роли на папку** (`folder_permissions`): `viewer` «Сотрудник» (просмотр/скачивание) /
+  `editor` «Редактор» (правка описаний + загрузка) / `admin` «Администратор папки»
+  (права редактора + подпапки + удаление фото).
 
 ### Группы
 - `GET /api/photo/groups` (viewer+), `POST /api/photo/groups` (admin), `DELETE /api/photo/groups/{id}` (admin).
@@ -117,7 +128,7 @@
 - `GET/POST /api/photo/photos/{id}/visibility` (admin): `{override: "|grant|deny", subjects[]}`.
 
 ### Удаление
-- `DELETE /api/photo/photos/{id}` (admin или автор карточки).
+- `DELETE /api/photo/photos/{id}` (admin системы или папки, или автор карточки).
 
 ### GET /api/photo/health — статус.
 

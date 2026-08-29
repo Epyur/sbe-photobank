@@ -243,6 +243,48 @@ export class PhotobankSyncService {
     this.assertOk(res);
   }
 
+  /** Включает/выключает «ограниченный доступ» к папке (admin системы или папки). */
+  async setFolderLimited(folderId: number, limited: boolean): Promise<void> {
+    const token = await this.getToken();
+    const res = await this.request({
+      url: `${this.baseUrl}/api/photo/folders/${folderId}/limited`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ limited }),
+    });
+    this.assertOk(res);
+  }
+
+  /** Общий уровень доступа («сотрудник» по умолчанию: viewer). */
+  async getCommonAccess(): Promise<string> {
+    const token = await this.getToken();
+    const res = await this.request({
+      url: `${this.baseUrl}/api/photo/common-access`,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    this.assertOk(res);
+    try {
+      const data = JSON.parse(res.text) as { level?: string };
+      return data.level || 'viewer';
+    } catch (e: unknown) {
+      console.warn('Фотобанк: не JSON в ответе common-access:', errorMessage(e));
+      return 'viewer';
+    }
+  }
+
+  /** Устанавливает общий уровень доступа ({level}); "" — закрыть общий доступ. */
+  async setCommonAccess(level: string): Promise<void> {
+    const token = await this.getToken();
+    const res = await this.request({
+      url: `${this.baseUrl}/api/photo/common-access`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ level }),
+    });
+    this.assertOk(res);
+  }
+
   /** Создаёт папку (admin). */
   async createFolder(name: string, parentId: number): Promise<number> {
     const token = await this.getToken();

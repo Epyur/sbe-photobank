@@ -60,7 +60,7 @@ func (s *Server) seedOwner(ctx context.Context) error {
 		return nil
 	}
 	_, err := s.pool.Exec(ctx, `
-INSERT INTO photo_permissions (app, email, role) VALUES ($1, $2, 'admin')
-ON CONFLICT (app, email) DO NOTHING`, appIDFromEnv(), owner)
+INSERT INTO photo_permissions (app, email, role) VALUES ($1, $2, 'superadmin')
+ON CONFLICT (app, email) DO UPDATE SET role = EXCLUDED.role`, appIDFromEnv(), owner)
 	return err
 }

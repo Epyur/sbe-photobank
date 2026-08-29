@@ -65,6 +65,7 @@ export class PhotobankImportService {
             name,
             parent_id: targetFolderId,
             owner_email: '',
+            limited: false,
             created_at: now,
             updated_at: now,
           };

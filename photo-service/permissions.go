@@ -62,6 +62,8 @@ SELECT email, role FROM photo_permissions WHERE app = $1 ORDER BY email`, appIDF
 }
 
 // handleSetPermission устанавливает глобальную роль ({email, role}); role="" — удаляет доступ.
+// Роли: viewer(1) < commenter(2) < editor(3) < admin(4) < superadmin(5).
+// superadmin (владелец системы) может назначить/снять только действующий superadmin.
 func (s *Server) handleSetPermission(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -77,12 +79,26 @@ func (s *Server) handleSetPermission(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "email is required"})
 		return
 	}
-	if req.Role != "" && req.Role != "viewer" && req.Role != "commenter" && req.Role != "editor" && req.Role != "admin" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role must be viewer, commenter, editor or admin"})
+	if req.Role != "" && req.Role != "viewer" && req.Role != "commenter" && req.Role != "editor" && req.Role != "admin" && req.Role != "superadmin" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role must be viewer, commenter, editor, admin or superadmin"})
 		return
 	}
 
-	if req.Role == "" || req.Role != "admin" {
+	// Назначить/снять superadmin может только действующий superadmin.
+	if req.Role == "superadmin" {
+		actor, _ := r.Context().Value(permEmailCtx{}).(string)
+		actorRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), actor)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+			return
+		}
+		if roleRank(actorRole) < roleRank("superadmin") {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: superadmin required"})
+			return
+		}
+	}
+
+	if req.Role == "" || (req.Role != "admin" && req.Role != "superadmin") {
 		owner := ownerEmailFromEnv()
 		if req.Email == owner {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "нельзя отозвать доступ владельца"})
@@ -102,6 +118,45 @@ ON CONFLICT (app, email) DO UPDATE SET role = EXCLUDED.role`,
 	}
 	if err != nil {
 		log.Printf("set permission: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleGetCommonAccess возвращает общий уровень доступа («сотрудник» по умолчанию).
+func (s *Server) handleGetCommonAccess(w http.ResponseWriter, r *http.Request) {
+	var level string
+	err := s.pool.QueryRow(r.Context(),
+		`SELECT level FROM photo_common_access WHERE app = $1`, appIDFromEnv()).Scan(&level)
+	if err != nil {
+		level = "viewer"
+	}
+	if level == "" {
+		level = "viewer"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"level": level})
+}
+
+// handleSetCommonAccess устанавливает общий уровень доступа ({level}).
+// viewer — все видят папки как «сотрудник»; "" — закрыть общий доступ.
+func (s *Server) handleSetCommonAccess(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Level string `json:"level"`
+	}
+	if err := decodeJSON(w, r, &req, 1<<20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	req.Level = strings.TrimSpace(req.Level)
+	if req.Level != "" && req.Level != "viewer" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "level must be viewer or empty"})
+		return
+	}
+	if _, err := s.pool.Exec(r.Context(), `
+INSERT INTO photo_common_access (app, level) VALUES ($1, $2)
+ON CONFLICT (app) DO UPDATE SET level = EXCLUDED.level`, appIDFromEnv(), req.Level); err != nil {
+		log.Printf("set common access: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
 		return
 	}
