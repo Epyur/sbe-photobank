@@ -146,6 +146,10 @@ export class PhotobankView extends ItemView {
     moveBtn.disabled = this.state.selectedPhotoIds.size === 0;
     moveBtn.addEventListener('click', () => void this.moveSelectedToFolder());
 
+    const deleteSelBtn = topbar.createEl('button', { text: '🗑 Удалить выбранные', cls: 'tn-btn tn-btn-ghost' });
+    deleteSelBtn.disabled = this.state.selectedPhotoIds.size === 0;
+    deleteSelBtn.addEventListener('click', () => void this.deleteSelected());
+
     const body = this.container.createDiv({ cls: 'tn-photo-body' });
     this.renderSidebar(body);
     this.renderContent(body);
@@ -759,6 +763,33 @@ export class PhotobankView extends ItemView {
     } catch (e: unknown) {
       new Notice(`Фотобанк: ${errorMessage(e)}`);
     }
+  }
+
+  /** Удаляет выбранные фотографии (админ или автор) — последовательно через deletePhoto. */
+  private async deleteSelected(): Promise<void> {
+    const ids = Array.from(this.state.selectedPhotoIds);
+    if (ids.length === 0) return;
+    const confirmed = window.confirm
+      ? window.confirm(`Удалить выбранных файлов: ${ids.length}? Это действие необратимо.`)
+      : true;
+    if (!confirmed) return;
+    let ok = 0;
+    for (const id of ids) {
+      const p = this.plugin.db.getPhoto(id);
+      if (!p) continue;
+      try {
+        await this.plugin.syncService.deletePhoto(p.id);
+        this.plugin.db.deletePhoto(p.id);
+        ok++;
+      } catch (e: unknown) {
+        console.warn(`Фотобанк: не удалось удалить «${p.file_name}»:`, errorMessage(e));
+      }
+    }
+    await this.plugin.db.save();
+    this.state.selectedPhotoIds = new Set();
+    this.state.selectionMode = false;
+    new Notice(`Фотобанк: удалено файлов: ${ok} из ${ids.length}`);
+    this.render();
   }
 
   private async renderComments(box: HTMLElement, photoId: number): Promise<void> {

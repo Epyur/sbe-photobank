@@ -596,10 +596,12 @@ export class PhotobankSyncService {
     }
   }
 
-  /** requestUrl в Obsidian не имеет таймаута — без обёртки зависший сервер не даст ответа никогда. */
+  /** requestUrl в Obsidian не имеет таймаута — без обёртки зависший сервер не даст ответа никогда.
+   *  Дефолт 120 сек: rclone-скачивания миниатюр под параллельной нагрузкой занимают 10+ сек,
+   *  при 30-сек лимите pull/комментарии не успевали. */
   private async request(
     param: RequestUrlParam,
-    timeoutMs = 30000,
+    timeoutMs = 120000,
   ): Promise<{ status: number; text: string; arrayBuffer: ArrayBuffer }> {
     let timer: number | undefined;
     try {
