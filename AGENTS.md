@@ -63,6 +63,21 @@ LLM-fallback поиска — через sbe-llm (клиент).
 
 ## История работ
 
+### 2026-08-29 — v0.1.18b (API для внешних потребителей: агент и презентации)
+- **SbePhotobankApi расширен** (sbe-core `types.ts`, аддитивно): добавлены
+  `searchPhotos(query, {limit, folderId, kind})`, `downloadPhotoFile(fileKey,
+  view?)`, `getPhotoLink(fileKey)` + тип `PhotobankPhotoMeta`.
+- **Реализация в плагине** (`src/main.ts`): методы опубликованы в
+  `publishService` как обёртки над `syncService.search/downloadFile/getFileLink`;
+  карточка приводится к `PhotobankPhotoMeta` (`toPhotoMeta`) — внутренние поля
+  наружу не уходят.
+- **Потребители**: агент `sbe-agent` (тулы `get_photos`/`get_photo_link`) и
+  «Мастер презентаций» (иллюстрации из Фотобанка) — см. их AGENTS.md.
+- **Текст новости в «Новости» ЦУП** обновлён под новую версию (доступ другим
+  плагинам).
+- Версия 0.1.17 → **0.1.18b** (ветка `backend`, на `main` не перенесена — суффикс `b`).
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK.
+
 ### 2026-08-29 — v0.1.17 (названия папок в локальном кэше)
 - **Дефект-фикс**: карточки фото ссылались только на `folder_id`, а при удалении папки
   с сервера (каскад) названия папок терялись безвозвратно — в кэше оставались сироты
