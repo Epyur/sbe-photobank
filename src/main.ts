@@ -6,7 +6,8 @@ import { PhotobankImportService } from './services/import.service';
 import { PhotobankView, SBE_PHOTOBANK_VIEW_TYPE } from './ui/photobank-view';
 import { PhotobankSettingsTab } from './ui/settings-tab';
 import { publishService, unpublishService, getService } from '../../sbe-core/src/bridge';
-import type { SbePhotobankApi } from '../../sbe-core/src/types';
+import type { SbePhotobankApi, PhotobankPhotoMeta } from '../../sbe-core/src/types';
+import type { PhotoItem } from './types/photobank';
 import { errorMessage } from '../../sbe-core/src/utils/errors';
 
 export interface SbePhotobankSettings {
@@ -65,6 +66,21 @@ export default class SbePhotobankPlugin extends Plugin {
       open: async () => {
         await this.activateView();
       },
+      searchPhotos: async (query, opts) => {
+        const items = await this.syncService.search(
+          query || '',
+          opts?.folderId,
+          opts?.kind,
+        );
+        const limit = Math.max(1, Math.min(opts?.limit ?? 20, 200));
+        return items.slice(0, limit).map(toPhotoMeta);
+      },
+      downloadPhotoFile: async (fileKey, view) => {
+        return this.syncService.downloadFile(fileKey, view ?? false);
+      },
+      getPhotoLink: async (fileKey) => {
+        return this.syncService.getFileLink(fileKey);
+      },
     }, {
       version: this.manifest.version,
       name: this.manifest.name,
@@ -122,7 +138,7 @@ export default class SbePhotobankPlugin extends Plugin {
         appId: this.manifest.id,
         appName: this.manifest.name,
         version: this.manifest.version,
-        summary: 'Запущен новый плагин «LogicTEAM.Фотобанк»: корпоративное хранилище фото и видео. Загружайте материалы, находите их по свободному описанию (умный поиск с ИИ), собирайте подборки и делитесь ссылками.',
+        summary: 'Фотобанк теперь доступен и другим плагинам: агент «LogicTEAM.007» умеет искать фотографии по вашему запросу, а «Мастер презентаций» может подбирать фото как иллюстрации к слайдам.',
       });
       this.settings.lastAnnouncedVersion = this.manifest.version;
       await this.saveSettings();
@@ -130,4 +146,27 @@ export default class SbePhotobankPlugin extends Plugin {
       console.warn('Фотобанк: не удалось опубликовать новость об обновлении:', errorMessage(e));
     }
   }
+}
+
+/** Приводит карточку фотобанка к метаданным для внешних потребителей (без внутренних полей). */
+function toPhotoMeta(p: PhotoItem): PhotobankPhotoMeta {
+  return {
+    id: p.id,
+    folder_id: p.folder_id,
+    folder_name: p.folder_name || '',
+    title: p.title,
+    description: p.description,
+    tags: Array.isArray(p.tags) ? p.tags.slice() : [],
+    file_key: p.file_key,
+    file_name: p.file_name,
+    mime_type: p.mime_type,
+    kind: p.kind,
+    width: p.width,
+    height: p.height,
+    thumb_key: p.thumb_key,
+    author_email: p.author_email,
+    location: p.location,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+  };
 }
