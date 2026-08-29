@@ -77,11 +77,13 @@ export class PhotobankSyncService {
   }
 
   async push(token: string, photos: PhotoItem[]): Promise<PushResponse> {
+    const body = JSON.stringify({ photos });
+    console.debug('[sbe-photobank][debug] POST /api/photo/sync/push body:', body);
     const res = await this.request({
       url: `${this.baseUrl}/api/photo/sync/push`,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ photos }),
+      body,
     });
     this.assertOk(res);
     try {

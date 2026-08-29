@@ -119,6 +119,15 @@ ${schemaBlock}
 - Персоны: ${input.context.people || 'не указано'}
 - Цель использования: ${input.context.purpose || 'не указано'}`;
 
+    console.debug('[sbe-photobank][debug] ИИ-описание:', {
+      file: input.fileName,
+      folderPath: input.folderPath,
+      kind: input.kind,
+      imageUrl: input.imageUrl || null,
+      system,
+      user,
+    });
+
     try {
       let result: Partial<AiDescribeResult>;
       if (input.imageUrl) {
