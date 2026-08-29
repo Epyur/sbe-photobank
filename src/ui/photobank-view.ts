@@ -208,6 +208,22 @@ export class PhotobankView extends ItemView {
     folderGroup.createSpan({ cls: 'tn-photo-grp-chev', text: '▶' });
     folderGroup.classList.add('open');
     const folderSub = nav.createDiv({ cls: 'tn-photo-submenu' });
+
+    // Корень — фото без папки (folder_id=0).
+    const rootBtn = folderSub.createEl('button', {
+      cls: `tn-photo-nav-item tn-photo-folder-name${this.state.currentFolderId === 0 && this.state.view === 'folder' ? ' active' : ''}`,
+      attr: { title: 'Корень' },
+    });
+    rootBtn.createSpan({ cls: 'tn-photo-nav-ico', text: '📁' });
+    rootBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Корень' });
+    rootBtn.addEventListener('click', () => {
+      this.state.currentFolderId = 0;
+      this.state.view = 'folder';
+      this.state.search = '';
+      this.state.selectedPhotoId = null;
+      this.render();
+    });
+
     const tree = this.plugin.db.folderTree();
     this.renderFolderTree(folderSub, tree, 0, 0);
 
@@ -231,11 +247,6 @@ export class PhotobankView extends ItemView {
     createFolderBtn.createSpan({ text: '➕' });
     createFolderBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Создать папку' });
     createFolderBtn.addEventListener('click', () => void this.openCreateFolder());
-
-    const redescribeBtn = actions.createEl('button', { cls: 'tn-photo-nav-action' });
-    redescribeBtn.createSpan({ text: '♻️' });
-    redescribeBtn.createSpan({ cls: 'tn-photo-nav-lbl', text: 'Переописать все' });
-    redescribeBtn.addEventListener('click', () => void this.rewriteAllAiDescriptions());
   }
 
   private renderFolderTree(parent: HTMLElement, tree: Map<number, PhotoFolder[]>, parentId: number, depth: number): void {
@@ -330,12 +341,10 @@ export class PhotobankView extends ItemView {
     photos = this.plugin.db.getAllPhotos();
     if (this.state.view === 'folder') {
       photos = photos.filter(p => p.folder_id === this.state.currentFolderId);
-      const folder = this.plugin.db.getFolder(this.state.currentFolderId);
-      if (folder) {
-        const head = content.createDiv({ cls: 'tn-photo-page-head' });
-        head.createEl('h2', { cls: 'tn-photo-page-title', text: folder.name });
-        head.createSpan({ cls: 'tn-photo-page-count', text: `${photos.length} файл(ов)` });
-      }
+      const folder = this.state.currentFolderId === 0 ? undefined : this.plugin.db.getFolder(this.state.currentFolderId);
+      const head = content.createDiv({ cls: 'tn-photo-page-head' });
+      head.createEl('h2', { cls: 'tn-photo-page-title', text: folder?.name || 'Корень' });
+      head.createSpan({ cls: 'tn-photo-page-count', text: `${photos.length} файл(ов)` });
     }
     if (this.state.kindFilter) {
       photos = photos.filter(p => p.kind === this.state.kindFilter);
@@ -679,18 +688,20 @@ export class PhotobankView extends ItemView {
   }
 
   /** Массовое переописание всех карточек через ИИ (последовательно, с учётом vision). */
-  private async rewriteAllAiDescriptions(): Promise<void> {
+  /** Переописание всех карточек указанной папки через ИИ (последовательно, с учётом vision). */
+  private async rewriteFolderAiDescriptions(folderId: number): Promise<void> {
     if (!(await this.plugin.aiService.isAvailable())) {
       new Notice('Фотобанк: LLM-центр недоступен (sbe-llm не настроен)');
       return;
     }
-    const all = this.plugin.db.getAllPhotos();
+    const folder = this.plugin.db.getFolder(folderId);
+    const all = this.plugin.db.getAllPhotos().filter(p => p.folder_id === folderId);
     if (all.length === 0) {
-      new Notice('Фотобанк: нет карточек для переописания');
+      new Notice(`Фотобанк: в папке «${folder?.name || '?'}» нет карточек для переописания`);
       return;
     }
     const ctx: AiDescribeContext = { content: '', event: '', location: '', people: '', purpose: '' };
-    new Notice(`Фотобанк: переописываю ${all.length} файлов…`);
+    new Notice(`Фотобанк: переописываю ${all.length} файлов в «${folder?.name || '?'}»…`);
     let ok = 0;
     for (const p of all) {
       if (await this.rewriteOne(p, ctx)) ok++;
@@ -1034,6 +1045,8 @@ export class PhotobankView extends ItemView {
     }
     const modal = new FolderSettingsModal(this.app, this.plugin, folder, () => {
       void this.refreshMeta().then(() => this.render());
+    }, (folderId) => {
+      void this.rewriteFolderAiDescriptions(folderId);
     });
     modal.open();
   }
@@ -1095,17 +1108,25 @@ class SimpleModal extends Modal {
   }
 }
 
-/** «Свойства папки»: переименование, права доступа (email/группы), удаление (admin). */
+/** «Свойства папки»: переименование, права доступа (email/группы), переописание, удаление (admin). */
 class FolderSettingsModal extends Modal {
   private plugin: SbePhotobankPlugin;
   private folder: PhotoFolder;
   private onChanged: () => void;
+  private onRedescribe: (folderId: number) => void;
 
-  constructor(app: App, plugin: SbePhotobankPlugin, folder: PhotoFolder, onChanged: () => void) {
+  constructor(
+    app: App,
+    plugin: SbePhotobankPlugin,
+    folder: PhotoFolder,
+    onChanged: () => void,
+    onRedescribe: (folderId: number) => void,
+  ) {
     super(app);
     this.plugin = plugin;
     this.folder = folder;
     this.onChanged = onChanged;
+    this.onRedescribe = onRedescribe;
   }
 
   override onOpen(): void {
@@ -1145,6 +1166,16 @@ class FolderSettingsModal extends Modal {
     box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Права доступа' });
     const permsBox = box.createDiv({ cls: 'tn-photo-mb8' });
     void this.renderPerms(permsBox);
+
+    // Переописание карточек этой папки через ИИ.
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'ИИ-описание' });
+    const redescribeBtn = box.createEl('button', {
+      text: '♻️ Переописать фотографии папки',
+      cls: 'tn-btn tn-btn-ghost tn-photo-mb8',
+    });
+    redescribeBtn.addEventListener('click', () => {
+      this.onRedescribe(this.folder.id);
+    });
 
     // Удаление.
     box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Удаление' });
