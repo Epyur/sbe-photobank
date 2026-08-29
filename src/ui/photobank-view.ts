@@ -876,9 +876,18 @@ export class PhotobankView extends ItemView {
       const data = await file.arrayBuffer();
       const up = await this.plugin.syncService.uploadFile(data, file.name, folderId, kind, this.mimeOf(ext));
       const aiEnabled = await this.plugin.aiService.isAvailable();
-      const imageUrl = aiEnabled && this.plugin.settings.visionEnabled && kind === 'image'
+      const wantVision = this.plugin.settings.visionEnabled && kind === 'image';
+      console.debug('[sbe-photobank][debug] uploadSingle:', {
+        file: file.name,
+        aiEnabled,
+        visionEnabled: this.plugin.settings.visionEnabled,
+        wantVision,
+        up: { file_key: up.file_key, thumb_key: up.thumb_key, width: up.width, height: up.height },
+      });
+      const imageUrl = aiEnabled && wantVision
         ? await this.getImageHttpUrl(up.thumb_key || up.file_key)
         : undefined;
+      console.debug('[sbe-photobank][debug] uploadSingle imageUrl:', imageUrl);
       const aiResult = aiEnabled ? await this.plugin.aiService.describe({
         fileName: file.name,
         folderPath: this.plugin.db.folderPath(folderId),
@@ -926,9 +935,11 @@ export class PhotobankView extends ItemView {
 
   /** Возвращает временную https-ссылку на файл (presigned через rclone link) для vision-описания. */
   private async getImageHttpUrl(key: string): Promise<string | undefined> {
+    console.debug('[sbe-photobank][debug] getImageHttpUrl key:', key);
     if (!key) return undefined;
     try {
       const url = await this.plugin.syncService.getFileLink(key);
+      console.debug('[sbe-photobank][debug] getImageHttpUrl link:', url);
       if (!url || !/^https?:\/\//.test(url)) return undefined;
       return url;
     } catch (e: unknown) {
