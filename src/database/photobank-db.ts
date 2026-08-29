@@ -33,6 +33,7 @@ export class PhotobankDatabase {
     } catch (e: unknown) {
       console.error('Фотобанк: не удалось прочитать БД:', errorMessage(e));
     }
+    this.refreshFolderNames();
   }
 
   private async ensureDataDir(): Promise<void> {
@@ -110,6 +111,7 @@ export class PhotobankDatabase {
     } else {
       this.data.photos.push(photo);
     }
+    this.refreshFolderNames();
   }
 
   updatePhoto(id: number, updates: Partial<PhotoItem>): void {
@@ -117,6 +119,7 @@ export class PhotobankDatabase {
     if (idx !== -1) {
       this.data.photos[idx] = { ...this.data.photos[idx], ...updates };
     }
+    this.refreshFolderNames();
   }
 
   deletePhoto(id: number): void {
@@ -125,6 +128,7 @@ export class PhotobankDatabase {
 
   setFolders(folders: PhotoFolder[]): void {
     this.data.folders = folders;
+    this.refreshFolderNames();
   }
 
   addFolder(folder: PhotoFolder): void {
@@ -134,11 +138,31 @@ export class PhotobankDatabase {
     } else {
       this.data.folders.push(folder);
     }
+    this.refreshFolderNames();
   }
 
   deleteFolder(id: number): void {
     this.data.folders = this.data.folders.filter(f => f.id !== id);
     this.data.photos = this.data.photos.filter(p => p.folder_id !== id);
+    this.refreshFolderNames();
+  }
+
+  /** Обновляет folder_name у карточек по текущему дереву папок. Если папки в кэше
+   *  больше нет (удалена на сервере) — прежнее имя сохраняется (не стирается). */
+  refreshFolderNames(): void {
+    const pathById = new Map<number, string>();
+    for (const p of this.data.photos) {
+      if (p.folder_id) {
+        let name = pathById.get(p.folder_id);
+        if (name === undefined) {
+          name = this.folderPath(p.folder_id);
+          pathById.set(p.folder_id, name);
+        }
+        if (name) {
+          p.folder_name = name;
+        }
+      }
+    }
   }
 
   setGroups(groups: PhotoGroup[]): void {
@@ -173,6 +197,7 @@ export class PhotobankDatabase {
         this.data.photos[idx] = { ...s, sync_status: 'synced' };
       }
     }
+    this.refreshFolderNames();
   }
 
   /** Удаляет локальные карточки, которых нет на сервере (сервер — канон). */
