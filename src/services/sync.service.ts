@@ -77,7 +77,9 @@ export class PhotobankSyncService {
   }
 
   async push(token: string, photos: PhotoItem[]): Promise<PushResponse> {
-    const body = JSON.stringify({ photos });
+    // Локальное поле folder_name на сервер не отправляется.
+    const payload = photos.map(({ folder_name: _foldername, ...rest }) => rest);
+    const body = JSON.stringify({ photos: payload });
     console.debug('[sbe-photobank][debug] POST /api/photo/sync/push body:', body);
     const res = await this.request({
       url: `${this.baseUrl}/api/photo/sync/push`,
