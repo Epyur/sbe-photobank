@@ -19,6 +19,10 @@ export interface SbePhotobankSettings {
    *  Требует vision-модели в chat-формате (например gpt-4o); модели Image API chad
    *  (gemini-*-image, gpt-img-*) для этого не подходят. */
   visionEnabled: boolean;
+  /** Пользовательский базовый промпт для ИИ-описания. Пусто — стандартный системный
+   *  промпт плагина (что на кадре, композиция, цвета; не фантазировать; title без
+   *  технического имени файла). Если задан — заменяет системный промпт плагина. */
+  basePrompt: string;
   /** Версия, для которой уже опубликована новость в «Новости» ЦУП. */
   lastAnnouncedVersion: string;
 }
@@ -28,6 +32,7 @@ const DEFAULT_SETTINGS: SbePhotobankSettings = {
   syncIntervalMs: 5 * 60 * 1000,
   llmModel: '',
   visionEnabled: false,
+  basePrompt: '',
   lastAnnouncedVersion: '',
 };
 
@@ -37,6 +42,8 @@ export default class SbePhotobankPlugin extends Plugin {
   syncService!: PhotobankSyncService;
   aiService!: AiDescribeService;
   importService!: PhotobankImportService;
+  /** Кэш глобальной роли пользователя (viewer/editor/admin/superadmin) — обновляется view. */
+  myRole = '';
   private syncTimer: number | undefined;
 
   async onload(): Promise<void> {
@@ -44,7 +51,7 @@ export default class SbePhotobankPlugin extends Plugin {
     this.db = new PhotobankDatabase(this.app);
     await this.db.init();
     this.syncService = new PhotobankSyncService(this.db, () => this.settings.apiUrl);
-    this.aiService = new AiDescribeService(() => this.settings.llmModel);
+    this.aiService = new AiDescribeService(() => this.settings.llmModel, () => this.settings.basePrompt);
     this.importService = new PhotobankImportService(this.app, this.db, this.syncService, this.aiService);
 
     this.registerView(

@@ -6,13 +6,15 @@ export interface PhotoFolder {
   name: string;
   parent_id: number;
   owner_email: string;
+  /** Ограниченный доступ: папка скрыта от общего просмотра (видна только по ролям). */
+  limited: boolean;
   created_at: string;
   updated_at: string;
   /** Права папки (admin видит при просмотре прав; в pull обычно пусто). */
   permissions?: PhotoFolderPerm[];
 }
 
-/** Доступ к папке: subject = email или имя группы, role = viewer|commenter|editor. */
+/** Доступ к папке: subject = email или имя группы, role = viewer|commenter|editor|admin. */
 export interface PhotoFolderPerm {
   subject: string;
   role: string;

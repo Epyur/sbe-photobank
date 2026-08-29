@@ -737,6 +737,18 @@
   background: var(--text-error-hover, #d93036);
 }
 
+/* Справка */
+.tn-photo-help-section {
+  margin-bottom: 12px;
+}
+
+.tn-photo-help-text {
+  margin: 4px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
 .tn-photo-depth-1 {
   margin-left: 10px;
 }
