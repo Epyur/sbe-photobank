@@ -329,6 +329,18 @@ export class PhotobankSyncService {
     this.assertOk(res);
   }
 
+  /** Переносит папку внутрь другой папки (admin системы или папки); parentId=0 — в корень. */
+  async moveFolder(id: number, parentId: number): Promise<void> {
+    const token = await this.getToken();
+    const res = await this.request({
+      url: `${this.baseUrl}/api/photo/folders/move`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, parent_id: parentId }),
+    });
+    this.assertOk(res);
+  }
+
   /** Создаёт/обновляет группу (admin). */
   async saveGroup(group: PhotoGroup): Promise<void> {
     const token = await this.getToken();
