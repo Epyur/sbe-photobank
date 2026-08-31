@@ -76,6 +76,7 @@ func main() {
 	mux.HandleFunc("GET /api/photo/folders", s.requirePerm("viewer")(s.handleListFolders))
 	mux.HandleFunc("POST /api/photo/folders", s.requirePerm("admin")(s.handleCreateFolder))
 	mux.HandleFunc("POST /api/photo/folders/rename", s.requirePerm("admin")(s.handleRenameFolder))
+	mux.HandleFunc("POST /api/photo/folders/move", s.requirePerm("viewer")(s.handleMoveFolder))
 	mux.HandleFunc("DELETE /api/photo/folders/{id}", s.requirePerm("viewer")(s.handleDeleteFolder))
 	mux.HandleFunc("POST /api/photo/folders/{id}/limited", s.requirePerm("viewer")(s.handleSetFolderLimited))
 	mux.HandleFunc("GET /api/photo/folders/{id}/permissions", s.requirePerm("viewer")(s.handleListFolderPerms))

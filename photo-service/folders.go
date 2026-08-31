@@ -290,6 +290,68 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// handleMoveFolder переносит папку ({id, parent_id}) внутрь другой папки
+// (или в корень при parent_id=0) (админ системы или админ папки).
+// Защита от цикла: нельзя перенести папку в саму себя или в её потомка.
+func (s *Server) handleMoveFolder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       int64 `json:"id"`
+		ParentID int64 `json:"parent_id"`
+	}
+	if err := decodeJSON(w, r, &req, 1<<20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	if req.ID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "id is required"})
+		return
+	}
+	if req.ParentID < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid parent_id"})
+		return
+	}
+	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	// Право: админ на переносимой папке и на целевой родительской папке.
+	if !s.canManageFolder(r.Context(), req.ID, email, globalRole) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
+		return
+	}
+	if req.ParentID > 0 {
+		if !s.folderExists(r.Context(), req.ParentID) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "parent folder not found"})
+			return
+		}
+		if !s.canManageFolder(r.Context(), req.ParentID, email, globalRole) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required on target folder"})
+			return
+		}
+		// Защита от цикла: папка не должна стать своим же потомком.
+		desc, err := s.folderAndDescendants(r.Context(), req.ID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+			return
+		}
+		for _, d := range desc {
+			if d == req.ParentID {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cannot move folder into itself or its child"})
+				return
+			}
+		}
+	}
+	if _, err := s.pool.Exec(r.Context(),
+		`UPDATE folders SET parent_id = $2, updated_at = now() WHERE id = $1`, req.ID, req.ParentID); err != nil {
+		log.Printf("move folder: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // handleDeleteFolder удаляет папку вместе с её подпапками и фото (admin системы или папки).
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	id := parseIntPath(r, "id")

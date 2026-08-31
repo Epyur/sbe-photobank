@@ -63,6 +63,21 @@ LLM-fallback поиска — через sbe-llm (клиент).
 
 ## История работ
 
+### 2026-09-01 — v0.1.19 (перенос папки внутрь другой)
+- **Перенос папки**: в «Свойствах папки» (✏️) добавлена секция «Перенос папки» —
+  select целевой папки (пути «Родитель / Папка») + кнопка «📁 Перенести»; можно
+  перенести и в корень (`parent_id=0`). Из целей исключены сама папка и её потомки.
+- **Сервер**: `POST /api/photo/folders/move` (`handleMoveFolder`) — права: админ
+  системы или админ папки (на переносимой и на целевой), защита от циклов (папка
+  не может стать потомком самой себя), `updated_at` обновляется.
+- **Клиент**: `syncService.moveFolder(id, parentId)`.
+- **Справка** (`help-modal.ts`) дополнена упоминанием переноса.
+- **Реестр**: для защиты от дрейфа CRLF добавлен `.gitattributes` (`manifest.json`/
+  `main.js`/`styles.css` — `-text`, как на main).
+- Версия 0.1.18 → **0.1.19** (manifest + package.json), пересборка `main.js`/`styles.css`.
+- `npx tsc --noEmit` EXIT=0, `npm run build` OK; сервер `go build`/`go vet` EXIT=0,
+  задеплоен.
+
 ### 2026-08-29 — v0.1.18b (API для внешних потребителей: агент и презентации)
 - **SbePhotobankApi расширен** (sbe-core `types.ts`, аддитивно): добавлены
   `searchPhotos(query, {limit, folderId, kind})`, `downloadPhotoFile(fileKey,

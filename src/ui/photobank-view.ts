@@ -1179,6 +1179,32 @@ class FolderSettingsModal extends Modal {
       }
     });
 
+    // Перенос папки (внутрь другой папки / в корень).
+    box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Перенос папки' });
+    const moveRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
+    const targetSelect = moveRow.createEl('select', { cls: 'tn-doc-select' });
+    const excluded = this.folderDescendantIds(this.folder.id);
+    targetSelect.createEl('option', { value: '0', text: 'Корень' });
+    for (const f of this.plugin.db.getFolders()) {
+      if (excluded.has(f.id)) continue;
+      targetSelect.createEl('option', { value: String(f.id), text: this.plugin.db.folderPath(f.id) || f.name });
+    }
+    targetSelect.value = String(this.folder.parent_id || 0);
+    const moveBtn = moveRow.createEl('button', { text: '📁 Перенести', cls: 'tn-btn tn-btn-primary tn-photo-mb8' });
+    moveBtn.addEventListener('click', async () => {
+      const target = parseInt(targetSelect.value, 10);
+      if (target === this.folder.parent_id) { new Notice('Папка уже в этом месте'); return; }
+      try {
+        await this.plugin.syncService.moveFolder(this.folder.id, target);
+        this.folder.parent_id = target;
+        new Notice('Папка перенесена');
+        this.onChanged();
+        this.render();
+      } catch (e: unknown) {
+        new Notice(`Фотобанк: ${errorMessage(e)}`);
+      }
+    });
+
     // Ограниченный доступ: папка скрыта от общего просмотра, видна только по ролям.
     box.createDiv({ cls: 'tn-photo-sidebar-title', text: 'Ограниченный доступ' });
     const limRow = box.createDiv({ cls: 'tn-photo-field tn-photo-mb8' });
@@ -1226,6 +1252,23 @@ class FolderSettingsModal extends Modal {
         new Notice(`Фотобанк: ${errorMessage(e)}`);
       }
     });
+  }
+
+  /** Множество id папки и всех её потомков (для исключения из целей переноса). */
+  private folderDescendantIds(id: number): Set<number> {
+    const tree = this.plugin.db.folderTree();
+    const out = new Set<number>([id]);
+    const queue: number[] = [id];
+    while (queue.length > 0) {
+      const p = queue.shift();
+      if (p === undefined) continue;
+      for (const c of tree.get(p) || []) {
+        if (out.has(c.id)) continue;
+        out.add(c.id);
+        queue.push(c.id);
+      }
+    }
+    return out;
   }
 
   private async renderPerms(box: HTMLElement): Promise<void> {
