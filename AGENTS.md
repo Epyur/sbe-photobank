@@ -63,6 +63,27 @@ LLM-fallback поиска — через sbe-llm (клиент).
 
 ## История работ
 
+### 2026-08-31 — фикс: «Контрольная сумма не совпадает» после самораздачи v0.1.18
+
+Тот же инцидент, что чинили в `sbe-apstore` (см. его `AGENTS.md` 2026-08-31 и
+`sbe-apstore-registry/AGENTS.md`, «Третий инцидент»): v0.1.18 залит через ЦУП
+«Мои плагины» на самораздачу `epyur.fvds.ru/plugins/sbe-photobank/`
+(2026-08-30, `selfHosted: true`), живой реестр обновлён под эти байты. Версия
+на GitHub (`main`) была та же 0.1.18, но обычный `git commit` на Windows
+(`core.autocrlf=true`) нормализовал CRLF → LF во всех трёх файлах
+(`manifest.json`/`main.js`/`styles.css` — здесь, в отличие от sbe-apstore,
+пострадали все три, не только manifest) — хеш блоба на GitHub разошёлся с
+хешем реестра, снятым с CRLF-версии. Клиенты ЦУП без поддержки `selfHosted`
+при обновлении фотобанка падали на сверке SHA-256.
+
+- Добавлен `.gitattributes` (`-text` на `manifest.json`/`main.js`/`styles.css`) +
+  renormalize, коммит в `main` — блобы на GitHub теперь побайтово совпадают с
+  самораздачей (проверено против `raw.githubusercontent.com` с retry, CDN
+  догнал на 3-й попытке).
+- `sbe-apstore-registry` (git) обновлён под факт живого сервера (`selfHosted`,
+  актуальные хеши, `uploadedAt`/`uploadedBy`) — был рассинхронизирован.
+- Ветка `backend` (бэкенд фотобанка) не трогалась — реестр раздаёт только `main`.
+
 ### 2026-08-29 — v0.1.18b (API для внешних потребителей: агент и презентации)
 - **SbePhotobankApi расширен** (sbe-core `types.ts`, аддитивно): добавлены
   `searchPhotos(query, {limit, folderId, kind})`, `downloadPhotoFile(fileKey,
