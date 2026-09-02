@@ -95,11 +95,20 @@ func (s *Server) visiblePhotoFilter(ctx context.Context, email string) (string, 
 	if len(visible) == 0 {
 		return `(visibility_override = 'grant')`, nil, nil
 	}
-	ids := make([]any, 0, len(visible))
+	// $1 должен быть ОДНИМ параметром-массивом для ANY($1), а не N отдельными
+	// позиционными параметрами — раньше ids собирался как []any{id1, id2, ...} и
+	// s.pool.Query(ctx, query, args...) раскрывал его в N скалярных аргументов
+	// ($1=id1, $2=id2, ...), при этом cond всё равно ссылался только на $1.
+	// Для viewer с >0 видимых папок (обычный случай — есть папки без limited)
+	// это ломало и pull, и search: "ERROR: could not determine data type of
+	// parameter $2 (SQLSTATE 42P18)" — найдено и исправлено 2026-09-02, у
+	// admin/superadmin баг не проявлялся (для них visiblePhotoFilter вообще не
+	// доходит до этой ветки — ранний return "", nil, nil).
+	ids := make([]int64, 0, len(visible))
 	for id := range visible {
 		ids = append(ids, id)
 	}
-	return `((folder_id = ANY($1)) OR (visibility_override = 'grant')) AND (visibility_override <> 'deny' OR visibility_override IS NULL)`, ids, nil
+	return `((folder_id = ANY($1)) OR (visibility_override = 'grant')) AND (visibility_override <> 'deny' OR visibility_override IS NULL)`, []any{ids}, nil
 }
 
 // handlePush приём/обновление карточек (editor+).

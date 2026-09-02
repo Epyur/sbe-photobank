@@ -65,6 +65,29 @@ docker compose logs photo --tail 20
 
 ## История
 
+- **2026-09-02 — найден и исправлен реальный баг: `sync/pull` и `search` падали
+  500 `db error` для ЛЮБОГО пользователя с ролью ниже admin.** Обнаружено
+  пользователем сразу после запуска «ЦУП Веб» на реальных пользователях (не
+  polishchuk@tn.ru) — у admin/superadmin баг не проявлялся, потому что
+  `visiblePhotoFilter` для них вообще не доходит до сломанной ветки (ранний
+  `return "", nil, nil"`).
+  - Причина: `visiblePhotoFilter` (`photos.go`) собирал id видимых папок как
+    `ids := make([]any, 0, ...)` и возвращал их как есть — `s.pool.Query(ctx,
+    query, args...)` разворачивал `[]any` через `...` в N ОТДЕЛЬНЫХ позиционных
+    параметров ($1=id1, $2=id2, ...), хотя SQL ожидал ОДИН параметр-массив для
+    `folder_id = ANY($1)`. Postgres: `ERROR: could not determine data type of
+    parameter $2 (SQLSTATE 42P18)`.
+  - Фикс: `ids` — `[]int64` (не `[]any`), возвращается обёрнутым в
+    `[]any{ids}` — ровно один аргумент-массив на позицию `$1`. Заодно чинит и
+    `search.go` (тот же `cond`/`args` от `visiblePhotoFilter`, `paramIdx :=
+    len(args)` раньше считал 4 вместо 1 и сдвигал нумерацию последующих
+    плейсхолдеров).
+  - Проверено на реальном пользователе с ролью viewer (не admin): до фикса —
+    500 на `pull`/`search`; после — 200, корректная фильтрация (179 из 183
+    фото, 4 скрыты в ограниченной папке).
+  - `go build`/`go vet` — чисто. Задеплоено (`docker compose up -d --build
+    photo`).
+
 - **2026-09-02 — веб-канал (channel=web) для «ЦУП Веб»: блок записи + фикс прав.**
   - **Побочная находка, исправлена по решению пользователя**: `POST
     /api/photo/folders/{id}/permissions` (`handleSetFolderPerm`, `folders.go`) был
