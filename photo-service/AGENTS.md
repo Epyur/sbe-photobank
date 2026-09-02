@@ -65,6 +65,31 @@ docker compose logs photo --tail 20
 
 ## История
 
+- **2026-09-02 — веб-канал (channel=web) для «ЦУП Веб»: блок записи + фикс прав.**
+  - **Побочная находка, исправлена по решению пользователя**: `POST
+    /api/photo/folders/{id}/permissions` (`handleSetFolderPerm`, `folders.go`) был
+    защищён на уровне роута только `viewer` и БЕЗ внутренней проверки на admin/
+    владельца папки — в отличие от соседних create/rename/move/delete. Любой
+    авторизованный пользователь мог назначить себе `admin` любой папки прямым
+    вызовом API. Добавлена та же проверка `canManageFolder`, что и у остальных
+    операций над папкой.
+  - `jwt.go`: `jwtClaims` += `Channel` (`"plugin"`/`"web"`, из нового claim в JWT,
+    см. `auth-service/AGENTS.md`); `requirePerm` кладёт канал в контекст (новый
+    `permChannelCtx{}`). Новый декоратор `requireNotWebChannel` — 403 независимо
+    от роли, композируется поверх `requirePerm`: `s.requirePerm(role)
+    (requireNotWebChannel(s.handleX))`.
+  - `main.go`: обёрнуты 14 write-маршрутов (upload file/thumb, folder create/
+    rename/move/delete/limited/permissions, permissions get/set, common-access
+    get/set, group CRUD, schema set, photo delete, visibility get/set). Осталось
+    без изменений: search, список/дерево папок (read), file/thumb/link (view),
+    like/favorite/comment (создание и чтение), favorites/recent, `photos/{id}/
+    view`, `sync/pull`, `permissions/me` — веб-порталу доступны просмотр/поиск/
+    соцслой, ничего больше.
+  - `go build`/`go vet` — чисто. Задеплоено (`docker compose up -d --build photo`),
+    E2E пройден живьём: web-JWT — search/like 200, folder-create 403 (`forbidden:
+    web channel is read-only`); тем же JWT с `channel=plugin` — без изменений
+    (регресс). Тестовые устройства/данные удалены после проверки.
+
 - **2026-08-29 — счётчик скачиваний (view=1):**
   `GET /api/photo/file?key=...&view=1` не инкрементит `download_count` — просмотр
   превью/миниатюры не считается скачиванием. Инкремент только при явном скачивании

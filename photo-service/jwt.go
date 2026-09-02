@@ -31,6 +31,9 @@ type jwtClaims struct {
 	Email    string `json:"email"`
 	DeviceID string `json:"device_id"`
 	AppID    string `json:"app_id"`
+	// Channel — "plugin" (Obsidian) или "web" («ЦУП Веб», 2026-09-02, magic-link).
+	// Веб-сессиям запрещена запись независимо от роли, см. requireNotWebChannel.
+	Channel string `json:"channel"`
 	jwt.RegisteredClaims
 }
 
@@ -96,6 +99,7 @@ func roleRank(role string) int {
 }
 
 type permEmailCtx struct{}
+type permChannelCtx struct{}
 
 func (s *Server) roleFor(ctx context.Context, appID, email string) (string, error) {
 	var role string
@@ -173,7 +177,24 @@ func (s *Server) requirePerm(minRole string) func(http.HandlerFunc) http.Handler
 			}
 
 			ctx := context.WithValue(r.Context(), permEmailCtx{}, claims.Email)
+			ctx = context.WithValue(ctx, permChannelCtx{}, claims.Channel)
 			next(w, r.WithContext(ctx))
 		}
+	}
+}
+
+// requireNotWebChannel — «ЦУП Веб» (2026-09-02): блокирует запись для JWT,
+// выданных веб-сессии (channel="web"), независимо от роли — веб-порталу
+// доступны только просмотр/поиск/соцслой (лайк/избранное/комментарии),
+// вся запись контента (загрузка, папки, права, группы, схема) — только через
+// Obsidian-плагин. Композируется поверх requirePerm:
+// s.requirePerm(role)(requireNotWebChannel(s.handleX)).
+func requireNotWebChannel(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ch, _ := r.Context().Value(permChannelCtx{}).(string); ch == "web" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: web channel is read-only"})
+			return
+		}
+		next(w, r)
 	}
 }

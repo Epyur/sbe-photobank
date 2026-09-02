@@ -452,7 +452,8 @@ SELECT subject, role FROM folder_permissions WHERE folder_id = $1`, id)
 	writeJSON(w, http.StatusOK, map[string]any{"permissions": perms})
 }
 
-// handleSetFolderPerm назначает доступ на папку ({subject, role}) (admin); role="" — убрать.
+// handleSetFolderPerm назначает доступ на папку ({subject, role}) (admin системы
+// или админ папки); role="" — убрать.
 func (s *Server) handleSetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	id := parseIntPath(r, "id")
 	if id <= 0 {
@@ -474,7 +475,22 @@ func (s *Server) handleSetFolderPerm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var err error
+	// «ЦУП Веб» ревью, 2026-09-02: маршрут был защищён только requirePerm("viewer")
+	// без внутренней проверки на admin/владельца папки (в отличие от соседних
+	// create/rename/move/delete) — любой авторизованный пользователь мог назначить
+	// себе admin любой папки. Добавлена та же проверка, что и у остальных операций
+	// над папкой.
+	email, _ := r.Context().Value(permEmailCtx{}).(string)
+	globalRole, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
+		return
+	}
+	if !s.canManageFolder(r.Context(), id, email, globalRole) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden: admin required"})
+		return
+	}
+
 	if req.Role == "" {
 		_, err = s.pool.Exec(r.Context(),
 			`DELETE FROM folder_permissions WHERE folder_id = $1 AND subject = $2`, id, req.Subject)
