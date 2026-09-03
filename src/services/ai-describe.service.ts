@@ -27,7 +27,7 @@ export class AiDescribeService {
   async isAvailable(): Promise<boolean> {
     try {
       const llm = await getService('sbe-llm');
-      return llm.getStatus().configured;
+      return (await llm.getStatus()).configured;
     } catch {
       return false;
     }
@@ -75,7 +75,7 @@ export class AiDescribeService {
       console.warn('Фотобанк: LLM недоступен, ИИ-описание пропущено:', errorMessage(e));
       return null;
     }
-    if (!llm.getStatus().configured) return null;
+    if (!(await llm.getStatus()).configured) return null;
 
     const schemaBlock = input.schema.length > 0
       ? '\nПоля схемы (их тоже заполни, если подходит контексту): ' + input.schema.map(f => `${f.key} (${f.type}, ${f.required ? 'обязательное' : 'необязательное'})`).join(', ')
@@ -220,7 +220,7 @@ ${schemaBlock}
     } catch {
       return null;
     }
-    if (!llm.getStatus().configured) return null;
+    if (!(await llm.getStatus()).configured) return null;
 
     const system = 'Ты помогаешь искать фото в корпоративном фотобанке. По свободному запросу пользователя ' +
       'верни ТОЛЬКО JSON: {"keywords": ["3-6 ключевых слов/тегов для полнотекстового поиска"]}. Слова — на русском, краткие.';
