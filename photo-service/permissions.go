@@ -12,11 +12,20 @@ func ownerEmailFromEnv() string {
 	return os.Getenv("PHOTO_OWNER_EMAIL")
 }
 
-// handleMyPermission возвращает глобальную роль текущего пользователя (по JWT email).
+// handleMyPermission возвращает глобальную роль текущего пользователя (по JWT
+// email). real_role — реальная роль БЕЗ учёта активного «просмотра от лица
+// роли» (нужна клиенту, чтобы показать переключатель ролей даже когда сам
+// суперадмин сейчас смотрит как viewer — иначе он потерял бы возможность
+// вернуться в реальную роль).
 func (s *Server) handleMyPermission(w http.ResponseWriter, r *http.Request) {
 	email, ok := r.Context().Value(permEmailCtx{}).(string)
 	if !ok || email == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	rawRole, err := s.rawRole(r.Context(), appIDFromEnv(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db error"})
 		return
 	}
 	role, err := s.effectiveRole(r.Context(), appIDFromEnv(), email)
@@ -25,10 +34,10 @@ func (s *Server) handleMyPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if role == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"email": email, "role": "", "hasAccess": false})
+		writeJSON(w, http.StatusOK, map[string]any{"email": email, "role": "", "real_role": rawRole, "hasAccess": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"email": email, "role": role, "hasAccess": true})
+	writeJSON(w, http.StatusOK, map[string]any{"email": email, "role": role, "real_role": rawRole, "hasAccess": true})
 }
 
 // handleListPermissions возвращает все глобальные роли (для admin).
